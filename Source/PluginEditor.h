@@ -29,6 +29,8 @@ private:
 
     void openNumericEntryPopupForSlider (juce::Slider& s);
     void openMidiChannelPrompt();
+    void openRetrigPrompt();
+    void scheduleRetrigTipAutoHide();
     void openInfoPopup();
     void openGraphicsPopup();
     void setPromptOverlayActive (bool shouldBeActive);
@@ -119,6 +121,7 @@ private:
     juce::ToggleButton midiButton;
 
     juce::Label midiChannelDisplay;
+    juce::Label retrigDisplay;
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;

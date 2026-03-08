@@ -21,6 +21,7 @@ public:
 	static constexpr const char* kParamPolarity  = "polarity";
 	static constexpr const char* kParamMix       = "mix";
 	static constexpr const char* kParamSync      = "sync";
+	static constexpr const char* kParamRetrig    = "retrig";
 	static constexpr const char* kParamMidi      = "midi";
 
 	// UI state parameters (hidden from DAW automation)
@@ -157,6 +158,10 @@ private:
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 
+	// ── Retrig (sync phase anchor) ──
+	double syncRetrigPhase = 0.0;  // phase derived from PPQ
+	bool useSyncRetrigPhase = false;
+
 	// ── MIDI note tracking ──
 	std::atomic<float> currentMidiFrequency { 0.0f };
 	std::atomic<int>   lastMidiNote { -1 };
@@ -172,6 +177,7 @@ private:
 	std::atomic<float>* polarityParam = nullptr;
 	std::atomic<float>* mixParam     = nullptr;
 	std::atomic<float>* syncParam    = nullptr;
+	std::atomic<float>* retrigParam  = nullptr;
 	std::atomic<float>* midiParam    = nullptr;
 
 	std::atomic<float>* uiWidthParam   = nullptr;

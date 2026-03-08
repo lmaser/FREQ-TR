@@ -124,6 +124,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	polarityParam = apvts.getRawParameterValue (kParamPolarity);
 	mixParam     = apvts.getRawParameterValue (kParamMix);
 	syncParam    = apvts.getRawParameterValue (kParamSync);
+	retrigParam  = apvts.getRawParameterValue (kParamRetrig);
 	midiParam    = apvts.getRawParameterValue (kParamMidi);
 
 	uiWidthParam   = apvts.getRawParameterValue (kParamUiWidth);
@@ -327,6 +328,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
 	const bool  syncEnabled = loadBoolParamOrDefault (syncParam, false);
 
+	useSyncRetrigPhase = false; // reset per block; set true if SYNC+RETRIG+PPQ
+
 	// Priority: MIDI note > Sync > Manual frequency (same as ECHO-TR)
 	const int  midiNote       = lastMidiNote.load (std::memory_order_relaxed);
 	const bool midiNoteActive = midiEnabled && (midiNote >= 0);
@@ -342,14 +345,45 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const int freqSyncValue = loadIntParamOrDefault (
 			apvts.getRawParameterValue (kParamFreqSync), kFreqSyncDefault);
 		double bpm = 120.0;
+		double ppqPos = 0.0;
+		bool ppqAvailable = false;
 		auto posInfo = getPlayHead();
 		if (posInfo != nullptr)
 		{
 			auto pos = posInfo->getPosition();
-			if (pos.hasValue() && pos->getBpm().hasValue())
-				bpm = *pos->getBpm();
+			if (pos.hasValue())
+			{
+				if (pos->getBpm().hasValue())
+					bpm = *pos->getBpm();
+				if (pos->getPpqPosition().hasValue())
+				{
+					ppqPos = *pos->getPpqPosition();
+					ppqAvailable = true;
+				}
+			}
 		}
 		targetFreq = tempoSyncToHz (freqSyncValue, bpm);
+
+		// ── RETRIG: compute oscPhase from PPQ position ──
+		const bool retrigEnabled = loadBoolParamOrDefault (retrigParam, false);
+		if (retrigEnabled && ppqAvailable)
+		{
+			// Period in quarter-note beats
+			const int syncIdx = juce::jlimit (0, 29, freqSyncValue);
+			const float divisions[] = { 64.0f, 32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f };
+			const int baseIdx = syncIdx / 3;
+			const int modifier = syncIdx % 3;
+			float periodBeats = 4.0f / divisions[baseIdx]; // in quarter-note beats
+			if (modifier == 0)       periodBeats *= (2.0f / 3.0f); // triplet
+			else if (modifier == 2)  periodBeats *= 1.5f;          // dotted
+
+			if (periodBeats > 0.0001f)
+			{
+				const double phaseFromPpq = std::fmod (ppqPos / (double) periodBeats, 1.0);
+				syncRetrigPhase = (phaseFromPpq < 0.0) ? phaseFromPpq + 1.0 : phaseFromPpq;
+				useSyncRetrigPhase = true;
+			}
+		}
 	}
 
 	// MOD multiplier (same curve as ECHO-TR/DISP-TR)
@@ -402,6 +436,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	for (int n = 0; n < numSamples; ++n)
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
+
+		// ── Phase: retrig from PPQ or free-running ──
+		if (useSyncRetrigPhase)
+		{
+			oscPhase = syncRetrigPhase + (double) smoothedFreq * ((double) n * (double) invSr);
+			oscPhase -= std::floor (oscPhase);
+		}
 
 		const float inL = (writeL != nullptr) ? writeL[n] : 0.0f;
 		const float inR = (writeR != nullptr) ? writeR[n] : inL;
@@ -469,9 +510,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
 
-		// Advance oscillator phase
-		oscPhase += (double) smoothedFreq * (double) invSr;
-		oscPhase -= std::floor (oscPhase);
+		// Advance oscillator phase (free-running mode only)
+		if (! useSyncRetrigPhase)
+		{
+			oscPhase += (double) smoothedFreq * (double) invSr;
+			oscPhase -= std::floor (oscPhase);
+		}
 
 		hilbertPos = (hilbertPos + 1) & (order - 1);
 	}
@@ -563,6 +607,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		juce::NormalisableRange<float> (kMixMin, kMixMax, 0.0f, 1.0f), kMixDefault));
 
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSync, "Sync", false));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamRetrig, "Retrig", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
 
 	// UI state (hidden from automation)

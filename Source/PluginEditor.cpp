@@ -53,6 +53,12 @@ static juce::String formatMidiChannelTooltip (int ch)
     return "CHANNEL " + juce::String (ch);
 }
 
+// ── Retrig tooltip ──
+static juce::String formatRetrigTooltip (bool on)
+{
+    return juce::String ("RETRIG: ") + (on ? "ON" : "OFF");
+}
+
 // ── Parameter listener IDs ──
 static constexpr std::array<const char*, 4> kUiMirrorParamIds {
     FREQTRAudioProcessor::kParamUiPalette,
@@ -353,6 +359,18 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     midiChannelDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
     midiChannelDisplay.setOpaque (false);
     addAndMakeVisible (midiChannelDisplay);
+
+    // Retrig tooltip overlay (over SYNC label)
+    const bool savedRetrig = audioProcessor.apvts.getParameterAsValue (
+        FREQTRAudioProcessor::kParamRetrig).getValue();
+    retrigDisplay.setText ("", juce::dontSendNotification);
+    retrigDisplay.setInterceptsMouseClicks (true, false);
+    retrigDisplay.addMouseListener (this, false);
+    retrigDisplay.setTooltip (formatRetrigTooltip (savedRetrig));
+    retrigDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+    retrigDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+    retrigDisplay.setOpaque (false);
+    addAndMakeVisible (retrigDisplay);
 
     auto bindSlider = [&] (std::unique_ptr<SliderAttachment>& attachment,
                            const char* paramId,
@@ -1693,6 +1711,48 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         }));
 }
 
+void FREQTRAudioProcessorEditor::openRetrigPrompt()
+{
+    const bool wasOn = audioProcessor.apvts.getParameterAsValue (
+        FREQTRAudioProcessor::kParamRetrig).getValue();
+    if (auto* p = audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamRetrig))
+        p->setValueNotifyingHost (wasOn ? 0.0f : 1.0f);
+
+    const auto newTip = formatRetrigTooltip (! wasOn);
+    retrigDisplay.setTooltip (newTip);
+
+    // Show updated text immediately, then schedule auto-hide when mouse leaves
+    if (tooltipWindow != nullptr)
+    {
+        const auto screenPos = retrigDisplay.localPointToGlobal (juce::Point<int> (0, 0));
+        tooltipWindow->displayTip (screenPos, newTip);
+        scheduleRetrigTipAutoHide();
+    }
+}
+
+void FREQTRAudioProcessorEditor::scheduleRetrigTipAutoHide()
+{
+    juce::Timer::callAfterDelay (80,
+        [safeThis = juce::Component::SafePointer<FREQTRAudioProcessorEditor> (this)]()
+        {
+            if (safeThis == nullptr) return;
+
+            const auto mouseScreenPos = juce::Desktop::getInstance()
+                                            .getMainMouseSource().getScreenPosition().toInt();
+            const auto retrigScreenBounds = safeThis->retrigDisplay.getScreenBounds();
+
+            if (retrigScreenBounds.contains (mouseScreenPos))
+            {
+                safeThis->scheduleRetrigTipAutoHide();   // still hovering — check again
+            }
+            else
+            {
+                if (safeThis->tooltipWindow != nullptr)
+                    safeThis->tooltipWindow->hideTip();   // mouse left — hide
+            }
+        });
+}
+
 void FREQTRAudioProcessorEditor::openMidiChannelPrompt()
 {
     lnf.setScheme (activeScheme);
@@ -2397,10 +2457,13 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // SYNC label click → toggle
-    if (getSyncLabelArea().contains (pt))
+    // SYNC label click → toggle (left), retrig toggle (right)
+    if (getSyncLabelArea().contains (pt) || retrigDisplay.getBounds().contains (pt))
     {
-        syncButton.setToggleState (! syncButton.getToggleState(), juce::sendNotificationSync);
+        if (e.mods.isPopupMenu())
+            openRetrigPrompt();
+        else
+            syncButton.setToggleState (! syncButton.getToggleState(), juce::sendNotificationSync);
         return;
     }
 
@@ -2941,6 +3004,12 @@ void FREQTRAudioProcessorEditor::resized()
 
     syncButton.setBounds (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
     midiButton.setBounds (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+
+    // Retrig tooltip overlay
+    {
+        const auto syncLabelRect = getSyncLabelArea();
+        retrigDisplay.setBounds (syncLabelRect);
+    }
 
     // MIDI tooltip overlay
     {

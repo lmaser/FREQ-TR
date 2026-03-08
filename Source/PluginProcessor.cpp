@@ -137,6 +137,29 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	const int h = loadIntParamOrDefault (uiHeightParam, 480);
 	uiEditorWidth.store (w, std::memory_order_relaxed);
 	uiEditorHeight.store (h, std::memory_order_relaxed);
+
+	buildShapeGainTable();
+}
+
+void FREQTRAudioProcessor::buildShapeGainTable()
+{
+	constexpr int kPhaseSteps = 4096;
+
+	for (int i = 0; i <= kShapeTableSize; ++i)
+	{
+		const float shape = (float) i / (float) kShapeTableSize;
+		float maxAbs = 0.0f;
+
+		for (int j = 0; j < kPhaseSteps; ++j)
+		{
+			const float phase = (float) j / (float) kPhaseSteps;
+			const float val = std::abs (morphedWave (phase, shape));
+			if (val > maxAbs)
+				maxAbs = val;
+		}
+
+		shapeGainTable[(size_t) i] = (maxAbs > 0.001f) ? (1.0f / maxAbs) : 1.0f;
+	}
 }
 
 FREQTRAudioProcessor::~FREQTRAudioProcessor()
@@ -304,8 +327,17 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
 	const bool  syncEnabled = loadBoolParamOrDefault (syncParam, false);
 
-	// SYNC mode: derive frequency from tempo
-	if (syncEnabled && !midiEnabled)
+	// Priority: MIDI note > Sync > Manual frequency (same as ECHO-TR)
+	const int  midiNote       = lastMidiNote.load (std::memory_order_relaxed);
+	const bool midiNoteActive = midiEnabled && (midiNote >= 0);
+
+	if (midiNoteActive)
+	{
+		const float midiFreq = currentMidiFrequency.load (std::memory_order_relaxed);
+		if (midiFreq > 0.1f)
+			targetFreq = midiFreq;
+	}
+	else if (syncEnabled)
 	{
 		const int freqSyncValue = loadIntParamOrDefault (
 			apvts.getRawParameterValue (kParamFreqSync), kFreqSyncDefault);
@@ -320,14 +352,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		targetFreq = tempoSyncToHz (freqSyncValue, bpm);
 	}
 
-	// MIDI overrides frequency
-	if (midiEnabled && lastMidiNote.load (std::memory_order_relaxed) >= 0)
-	{
-		const float midiFreq = currentMidiFrequency.load (std::memory_order_relaxed);
-		if (midiFreq > 0.1f)
-			targetFreq = midiFreq;
-	}
-
 	// MOD multiplier (same curve as ECHO-TR/DISP-TR)
 	float freqMultiplier;
 	if (modVal < 0.5f)
@@ -335,17 +359,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	else
 		freqMultiplier = 1.0f + ((modVal - 0.5f) * 6.0f);
 
-	// Apply polarity to frequency
-	const float polaritySign = (polarity >= 0.0f) ? 1.0f : -1.0f;
-
-	targetFreq *= freqMultiplier * polaritySign;
+	// Apply polarity as continuous multiplier (-1..+1; 0 = no effect)
+	targetFreq *= freqMultiplier * polarity;
 	targetFreq = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, targetFreq);
 
 	// Frequency smoothing (EMA, ~5ms) with MIDI glide support
 	float freqCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
 
 	// MIDI velocity-controlled glide
-	const bool midiNoteActive = midiEnabled && lastMidiNote.load (std::memory_order_relaxed) >= 0;
 	if (midiNoteActive)
 	{
 		const float vel  = (float) lastMidiVelocity.load (std::memory_order_relaxed);
@@ -363,15 +384,20 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float gainCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
 	juce::ignoreUnused (gainCoeff);
 
-	// AM polarity factor
-	const float amPolarity = (polarity >= 0.0f) ? 1.0f : -1.0f;
-
 	const int order = kHilbertOrder;
 	const int half  = order / 2;
 	const float invSr = 1.0f / (float) currentSampleRate;
 
 	float* writeL = (numChannels > 0) ? buffer.getWritePointer (0) : nullptr;
 	float* writeR = (numChannels > 1) ? buffer.getWritePointer (1) : nullptr;
+
+	// Peak-normalization factor for current shape (from precomputed table)
+	const float shapeIdx = shape * (float) kShapeTableSize;
+	const int si0 = juce::jlimit (0, kShapeTableSize - 1, (int) shapeIdx);
+	const int si1 = juce::jmin (si0 + 1, kShapeTableSize);
+	const float siFrac = shapeIdx - (float) si0;
+	const float shapeGain = shapeGainTable[(size_t) si0]
+						  + siFrac * (shapeGainTable[(size_t) si1] - shapeGainTable[(size_t) si0]);
 
 	for (int n = 0; n < numSamples; ++n)
 	{
@@ -410,8 +436,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float oscCos = std::cos ((float) oscPhase * juce::MathConstants<float>::twoPi);
 		const float oscSin = std::sin ((float) oscPhase * juce::MathConstants<float>::twoPi);
 
-		// Morphed waveform (for AM mode)
-		const float oscWave = morphedWave ((float) oscPhase, shape);
+		// Morphed waveform (for AM mode) — peak-normalized
+		const float oscWave = morphedWave ((float) oscPhase, shape) * shapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
 		float wetL, wetR;
@@ -424,9 +450,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 		else
 		{
-			// AM: input * wave  (ring modulation at engine=0), with polarity
-			const float amL = realL * oscWave * amPolarity;
-			const float amR = (style == 1) ? realR * oscWave * amPolarity : amL;
+			// AM: input * wave  (ring modulation at engine=0)
+			const float amL = realL * oscWave;
+			const float amR = (style == 1) ? realR * oscWave : amL;
 
 			// Freq Shift: Re[ analytic * e^(j2πft) ] = real*cos - hilbert*sin
 			const float fsL = realL * oscCos - hilbL * oscSin;

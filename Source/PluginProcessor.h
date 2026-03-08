@@ -148,6 +148,11 @@ private:
 	int hilbertPos = 0;                                // write position in circular buffers
 	std::vector<float> dryDelayBufL, dryDelayBufR;     // latency compensation for dry signal
 
+	// ── Shape peak-normalization table ──
+	static constexpr int kShapeTableSize = 256;
+	std::array<float, kShapeTableSize + 1> shapeGainTable {};
+	void buildShapeGainTable();
+
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target

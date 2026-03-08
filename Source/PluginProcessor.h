@@ -157,6 +157,9 @@ private:
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
+	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
+	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
+	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ

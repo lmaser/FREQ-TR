@@ -230,6 +230,9 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	hilbertPos = 0;
 	oscPhase = 0.0;
 	smoothedFreq = 0.0f;
+	smoothedEngine = 0.0f;
+	smoothedShape = 0.0f;
+	smoothedMix = 1.0f;
 }
 
 void FREQTRAudioProcessor::releaseResources()
@@ -414,9 +417,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		freqCoeff = std::exp (-1.0f / ((float) currentSampleRate * tau));
 	}
 
-	// Input gain smoothing
-	const float gainCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
-	juce::ignoreUnused (gainCoeff);
+	// EMA coefficient for mix/engine/shape (~5 ms)
+	const float paramCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
 
 	const int order = kHilbertOrder;
 	const int half  = order / 2;
@@ -425,17 +427,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	float* writeL = (numChannels > 0) ? buffer.getWritePointer (0) : nullptr;
 	float* writeR = (numChannels > 1) ? buffer.getWritePointer (1) : nullptr;
 
-	// Peak-normalization factor for current shape (from precomputed table)
-	const float shapeIdx = shape * (float) kShapeTableSize;
-	const int si0 = juce::jlimit (0, kShapeTableSize - 1, (int) shapeIdx);
-	const int si1 = juce::jmin (si0 + 1, kShapeTableSize);
-	const float siFrac = shapeIdx - (float) si0;
-	const float shapeGain = shapeGainTable[(size_t) si0]
-						  + siFrac * (shapeGainTable[(size_t) si1] - shapeGainTable[(size_t) si0]);
-
 	for (int n = 0; n < numSamples; ++n)
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
+		smoothedEngine = paramCoeff * smoothedEngine + (1.0f - paramCoeff) * engine;
+		smoothedShape  = paramCoeff * smoothedShape  + (1.0f - paramCoeff) * shape;
+		smoothedMix    = paramCoeff * smoothedMix    + (1.0f - paramCoeff) * mix;
 
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
@@ -477,8 +474,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float oscCos = std::cos ((float) oscPhase * juce::MathConstants<float>::twoPi);
 		const float oscSin = std::sin ((float) oscPhase * juce::MathConstants<float>::twoPi);
 
+		// Peak-normalization factor for current smoothed shape
+		const float curShapeIdx = smoothedShape * (float) kShapeTableSize;
+		const int csi0 = juce::jlimit (0, kShapeTableSize - 1, (int) curShapeIdx);
+		const int csi1 = juce::jmin (csi0 + 1, kShapeTableSize);
+		const float csiFrac = curShapeIdx - (float) csi0;
+		const float curShapeGain = shapeGainTable[(size_t) csi0]
+							  + csiFrac * (shapeGainTable[(size_t) csi1] - shapeGainTable[(size_t) csi0]);
+
 		// Morphed waveform (for AM mode) — peak-normalized
-		const float oscWave = morphedWave ((float) oscPhase, shape) * shapeGain;
+		const float oscWave = morphedWave ((float) oscPhase, smoothedShape) * curShapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
 		float wetL, wetR;
@@ -499,13 +504,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float fsL = realL * oscCos - hilbL * oscSin;
 			const float fsR = (style == 1) ? (realR * oscCos - hilbR * oscSin) : fsL;
 
-			wetL = amL + engine * (fsL - amL);
-			wetR = amR + engine * (fsR - amR);
+			wetL = amL + smoothedEngine * (fsL - amL);
+			wetR = amR + smoothedEngine * (fsR - amR);
 		}
 
 		// ── Mix ──
-		const float outL = dryL + mix * (wetL - dryL);
-		const float outR = dryR + mix * (wetR - dryR);
+		const float outL = dryL + smoothedMix * (wetL - dryL);
+		const float outR = dryR + smoothedMix * (wetR - dryR);
 
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;

@@ -773,7 +773,7 @@ juce::String FREQTRAudioProcessorEditor::getEngineText() const
     if (val > 0.99f)
         return "FREQ SHIFT ENGINE";
     const int pct = (int) std::lround (val * 100.0);
-    return juce::String (pct) + "% ENGINE";
+    return "AM/FREQ " + juce::String (pct) + "% ENGINE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
@@ -784,41 +784,60 @@ juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
     if (val > 0.99f)
         return "FREQ SHIFT";
     const int pct = (int) std::lround (val * 100.0);
-    return juce::String (pct) + "%";
+    return "AM/FREQ " + juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getStyleText() const
 {
     const int style = (int) styleSlider.getValue();
-    return (style == 0) ? "MONO STYLE" : "STEREO STYLE";
+    if (style == 0) return "MONO STYLE";
+    if (style == 1) return "STEREO STYLE";
+    return "WIDE STYLE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getStyleTextShort() const
 {
     const int style = (int) styleSlider.getValue();
-    return (style == 0) ? "MONO" : "STEREO";
+    if (style == 0) return "MONO";
+    if (style == 1) return "STEREO";
+    return "WIDE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getShapeText() const
 {
     const float val = (float) shapeSlider.getValue();
     const float scaled = val * 3.0f;
-    juce::String name;
-    if (scaled < 0.5f)        name = "SINE";
-    else if (scaled < 1.5f)   name = "TRI";
-    else if (scaled < 2.5f)   name = "SQR";
-    else                      name = "SAW";
-    return name + " SHAPE";
+
+    const char* names[]      = { "SINE", "TRI", "SQR", "SAW" };
+    const int seg = juce::jlimit (0, 2, (int) scaled);
+    const float frac = scaled - (float) seg;
+    const int pct = juce::roundToInt (frac * 100.0f);
+
+    if (pct <= 1)
+        return juce::String (names[seg]) + " SHAPE";
+    if (pct >= 99)
+        return juce::String (names[seg + 1]) + " SHAPE";
+
+    return juce::String (names[seg]) + "/" + names[seg + 1] + " " + juce::String (pct) + "% SHAPE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getShapeTextShort() const
 {
     const float val = (float) shapeSlider.getValue();
     const float scaled = val * 3.0f;
-    if (scaled < 0.5f)        return "SINE";
-    if (scaled < 1.5f)        return "TRI";
-    if (scaled < 2.5f)        return "SQR";
-    return "SAW";
+
+    const char* full[]  = { "SINE", "TRI", "SQR", "SAW" };
+    const char* abbr[]  = { "SIN", "TRI", "SQR", "SAW" };
+    const int seg = juce::jlimit (0, 2, (int) scaled);
+    const float frac = scaled - (float) seg;
+    const int pct = juce::roundToInt (frac * 100.0f);
+
+    if (pct <= 1)
+        return full[seg];
+    if (pct >= 99)
+        return full[seg + 1];
+
+    return juce::String (abbr[seg]) + "/" + abbr[seg + 1] + " " + juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getPolarityText() const

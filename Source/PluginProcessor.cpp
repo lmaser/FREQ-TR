@@ -494,23 +494,29 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float oscWave = morphedWave ((float) oscPhase, smoothedShape) * curShapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
+		//  style: 0 = MONO (L copied to R), 1 = STEREO (same shift both), 2 = WIDE (opposite shift R)
+		const bool useStereoInput = (style >= 1);   // STEREO and WIDE both use independent L/R
 		float wetL, wetR;
 
 		if (std::abs (smoothedFreq) < 0.001f)
 		{
 			// Bypass when frequency ≈ 0 to avoid silence from AM mode (sin(0)=0)
 			wetL = realL;
-			wetR = (style == 1) ? realR : realL;
+			wetR = useStereoInput ? realR : realL;
 		}
 		else
 		{
 			// AM: input * wave  (ring modulation at engine=0)
 			const float amL = realL * oscWave;
-			const float amR = (style == 1) ? realR * oscWave : amL;
+			const float amR = useStereoInput ? (realR * (style == 2 ? -oscWave : oscWave)) : amL;
 
 			// Freq Shift: Re[ analytic * e^(j2πft) ] = real*cos - hilbert*sin
+			// WIDE: R uses +sin (opposite sideband) → real*cos + hilbert*sin
 			const float fsL = realL * oscCos - hilbL * oscSin;
-			const float fsR = (style == 1) ? (realR * oscCos - hilbR * oscSin) : fsL;
+			const float fsR = useStereoInput
+				? (style == 2 ? (realR * oscCos + hilbR * oscSin)
+				               : (realR * oscCos - hilbR * oscSin))
+				: fsL;
 
 			wetL = amL + smoothedEngine * (fsL - amL);
 			wetR = amR + smoothedEngine * (fsR - amR);

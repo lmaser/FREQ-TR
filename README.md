@@ -25,7 +25,7 @@ The value column to the right of each slider shows the current state in context:
 - FREQ shows hertz (or MIDI note name when active, or sync division name).
 - MOD shows the frequency multiplier.
 - ENGINE shows AM/FREQ SHIFT blend percentage.
-- STYLE shows MONO/STEREO.
+- STYLE shows MONO/STEREO/WIDE.
 - SHAPE shows the oscillator waveform name.
 - POLARITY shows the current value (−1 to +1).
 - MIX shows percentage.
@@ -62,6 +62,7 @@ Blend between amplitude modulation and frequency shifting.
 Routing topology:
 - **MONO**: Single processing path, summed to both channels.
 - **STEREO**: Independent left/right processing with shared oscillator.
+- **WIDE**: Opposite frequency shifts per channel (L shifts up, R shifts down). Creates a wide stereo image through decorrelated sidebands. In AM mode, the right channel uses an inverted carrier.
 
 ### SHAPE (0–100%)
 
@@ -71,7 +72,7 @@ Oscillator waveform morphing through four shapes:
 - **66%**: Square
 - **100%**: Sawtooth
 
-Intermediate positions crossfade between adjacent waveforms.
+Intermediate positions crossfade between adjacent waveforms. The display shows the blend, e.g. `TRI/SQR 50%`.
 
 ### POLARITY (−1 to +1)
 

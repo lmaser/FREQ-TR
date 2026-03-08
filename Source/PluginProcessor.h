@@ -138,16 +138,16 @@ private:
 	double currentSampleRate = 44100.0;
 
 	// ── Hilbert transform (FIR, linear phase) ──
-	// Two FIR filters: one produces the 90° shifted version,
-	// the other is a matched delay for the real (0°) path.
+	// 90° FIR + matched delay for real (0°) path.
 	// At 0 Hz shift the output equals the delayed input exactly.
-	static constexpr int kHilbertOrder = 128;          // FIR taps (even)
+	static constexpr int kHilbertOrder = 128;          // FIR taps (even, power of 2)
 	static constexpr int kHilbertDelay = kHilbertOrder / 2;  // group delay in samples
-	std::vector<float> hilbertCoeffs;                  // 90° FIR coefficients
 	std::vector<float> hilbertBufL, hilbertBufR;       // circular FIR input buffers
-	std::vector<float> delayBufL, delayBufR;           // matched delay for real path
 	int hilbertPos = 0;                                // write position in circular buffers
-	std::vector<float> dryDelayBufL, dryDelayBufR;     // latency compensation for dry signal
+
+	// Folded Hilbert taps: exploit antisymmetry + zero-skip (128 → ~32 MACs)
+	struct HilbertTap { int offset; float coeff; };
+	std::vector<HilbertTap> hilbertFoldedTaps;
 
 	// ── Shape peak-normalization table ──
 	static constexpr int kShapeTableSize = 256;

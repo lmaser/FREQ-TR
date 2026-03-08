@@ -32,7 +32,7 @@ The value column to the right of each slider shows the current state in context:
 
 ## Parameters
 
-### FREQ (0–10,000 Hz)
+### FREQ (0–5,000 Hz)
 
 Shift frequency. At 0 Hz the output equals the input. Higher values produce increasingly inharmonic results.  
 The slider uses a skewed scale (0.35) so low frequencies have finer resolution.
@@ -80,7 +80,7 @@ Controls the direction of both the frequency shift and the AM carrier.
 - **−1**: Downward frequency shift / inverted AM polarity.
 - **0**: No shift (mutes the effect).
 
-The sign is applied as a simple multiplier: `polaritySign = (polarity >= 0) ? +1 : −1`.
+Applied as a continuous multiplier on the shift frequency.
 
 ### MIX (0–100%)
 
@@ -89,6 +89,10 @@ Dry/wet balance. 0% = fully dry, 100% = fully wet.
 ### SYNC
 
 Locks shift frequency to DAW tempo divisions. Disabled when MIDI is active (MIDI takes priority).
+
+### RETRIG
+
+Phase anchor for sync mode. When enabled (right-click on SYNC), the oscillator phase locks to the DAW transport position, so the modulation waveform restarts at each musical boundary. Hover over SYNC to see the current state (RETRIG: ON/OFF).
 
 ### MIDI
 
@@ -103,11 +107,10 @@ Enables MIDI note control of shift frequency. Incoming notes set frequency to `4
 ## Technical Details
 
 ### DSP Architecture
-- **Hilbert Transform**: 128-tap FIR filter with Blackman windowing. Produces analytic signal (90° phase-shifted quadrature pair).
-- **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output.
-- **Dry latency compensation**: Separate delay line for the dry signal to match the wet path's latency.
+- **Hilbert Transform**: 128-tap FIR filter with Blackman windowing. Antisymmetric tap folding reduces 128 MACs to ~32 per channel per sample.
+- **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix.
 - **Oscillator**: Band-limited morphing waveform (sine → triangle → square → sawtooth) with per-sample phase accumulation.
-- **Smoothing**: One-pole EMA per sample for frequency, gain, and mix parameters.
+- **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, and mix parameters.
 
 ### MIDI Implementation
 - Standard A440 tuning: `frequency = 440 × 2^((note − 69) / 12)`.
@@ -123,7 +126,7 @@ Enables MIDI note control of shift frequency. Incoming notes set frequency to `4
 ### Performance
 - Zero-allocation audio thread. All buffers pre-allocated in `prepareToPlay`.
 - Lock-free atomic parameter reads (`std::memory_order_relaxed`).
-- FIR convolution runs in the inner sample loop — no FFT partitioning (suitable for the 128-tap length).
+- FIR convolution uses antisymmetric folding (128 taps → ~32 multiply-accumulate ops per channel).
 
 ### Build
 - JUCE Framework, C++17, VST3 format.

@@ -211,21 +211,28 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	juce::ignoreUnused (samplesPerBlock);
 	currentSampleRate = sampleRate;
 
-	// ── Design Hilbert FIR ──
-	hilbertCoeffs.resize ((size_t) kHilbertOrder);
-	designHilbertFIR (hilbertCoeffs.data(), kHilbertOrder);
+	// ── Design Hilbert FIR and build folded taps ──
+	{
+		std::vector<float> coeffs ((size_t) kHilbertOrder, 0.0f);
+		designHilbertFIR (coeffs.data(), kHilbertOrder);
+
+		const int half = kHilbertOrder / 2;
+		hilbertFoldedTaps.clear();
+
+		// Exploit antisymmetry: h[k] = -h[N-1-k] for nonzero taps.
+		// Pair taps (k, N-1-k) into a single multiply: h[k] * (x[n-k] - x[n-(N-1-k)])
+		// Only odd-distance taps are nonzero, and we only need k < half.
+		for (int k = 0; k < half; ++k)
+		{
+			if (std::abs (coeffs[(size_t) k]) < 1e-12f)
+				continue;
+			hilbertFoldedTaps.push_back ({ k, coeffs[(size_t) k] });
+		}
+	}
 
 	// Circular buffers for FIR convolution
 	hilbertBufL.assign ((size_t) kHilbertOrder, 0.0f);
 	hilbertBufR.assign ((size_t) kHilbertOrder, 0.0f);
-
-	// Matched delay for real (0°) path — same group delay as the Hilbert FIR
-	delayBufL.assign ((size_t) kHilbertOrder, 0.0f);
-	delayBufR.assign ((size_t) kHilbertOrder, 0.0f);
-
-	// Dry signal delay compensation (matches Hilbert group delay)
-	dryDelayBufL.assign ((size_t) kHilbertOrder, 0.0f);
-	dryDelayBufR.assign ((size_t) kHilbertOrder, 0.0f);
 
 	hilbertPos = 0;
 	oscPhase = 0.0;
@@ -237,13 +244,9 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 void FREQTRAudioProcessor::releaseResources()
 {
-	hilbertCoeffs.clear();
 	hilbertBufL.clear();
 	hilbertBufR.clear();
-	delayBufL.clear();
-	delayBufR.clear();
-	dryDelayBufL.clear();
-	dryDelayBufR.clear();
+	hilbertFoldedTaps.clear();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -318,7 +321,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	for (int i = numChannels; i < buffer.getNumChannels(); ++i)
 		buffer.clear (i, 0, numSamples);
 
-	if (currentSampleRate <= 0.0 || hilbertCoeffs.empty())
+	if (currentSampleRate <= 0.0 || hilbertFoldedTaps.empty())
 		return;
 
 	// ── Read parameters ──
@@ -448,27 +451,22 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertBufL[(size_t) hilbertPos] = inL;
 		hilbertBufR[(size_t) hilbertPos] = inR;
 
-		// Store dry signal for latency compensation
-		dryDelayBufL[(size_t) hilbertPos] = inL;
-		dryDelayBufR[(size_t) hilbertPos] = inR;
-
-		// ── Hilbert FIR convolution (90° path) ──
+		// ── Hilbert FIR convolution (90° path) — folded antisymmetric taps ──
 		float hilbL = 0.0f, hilbR = 0.0f;
-		for (int k = 0; k < order; ++k)
+		for (const auto& tap : hilbertFoldedTaps)
 		{
-			const int idx = (hilbertPos - k + order) & (order - 1);
-			hilbL += hilbertBufL[(size_t) idx] * hilbertCoeffs[(size_t) k];
-			hilbR += hilbertBufR[(size_t) idx] * hilbertCoeffs[(size_t) k];
+			const int i1 = (hilbertPos - tap.offset + order) & (order - 1);
+			const int i2 = (hilbertPos - (order - 1 - tap.offset) + order) & (order - 1);
+			const float diffL = hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2];
+			const float diffR = hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2];
+			hilbL += tap.coeff * diffL;
+			hilbR += tap.coeff * diffR;
 		}
 
 		// ── Real path: delayed input (matches Hilbert group delay) ──
 		const int delayIdx = (hilbertPos - half + order) & (order - 1);
 		const float realL = hilbertBufL[(size_t) delayIdx];
 		const float realR = hilbertBufR[(size_t) delayIdx];
-
-		// ── Latency-compensated dry signal ──
-		const float dryL = dryDelayBufL[(size_t) delayIdx];
-		const float dryR = dryDelayBufR[(size_t) delayIdx];
 
 		// ── Oscillator ──
 		const float oscCos = std::cos ((float) oscPhase * juce::MathConstants<float>::twoPi);
@@ -508,9 +506,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			wetR = amR + smoothedEngine * (fsR - amR);
 		}
 
-		// ── Mix ──
-		const float outL = dryL + smoothedMix * (wetL - dryL);
-		const float outR = dryR + smoothedMix * (wetR - dryR);
+		// ── Mix (realL/R = latency-compensated dry signal) ──
+		const float outL = realL + smoothedMix * (wetL - realL);
+		const float outR = realR + smoothedMix * (wetR - realR);
 
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;

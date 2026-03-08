@@ -16,7 +16,7 @@ POLARITY flips the sign of the shift frequency (allowing downward shifts) and in
 FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visible at once — no pages, tabs, or hidden menus.
 
 - **Bar sliders**: Click and drag horizontally. Right-click for numeric entry (except STYLE, which is slider-only).
-- **Toggle buttons**: SYNC, MIDI. Click to enable/disable.
+- **Toggle buttons**: SYNC, MIDI, ALIGN, PDC. Click to enable/disable.
 - **Gear icon** (top-right): Opens the info popup with version, credits, and a link to Graphics settings.
 - **Graphics popup**: Toggle CRT post-processing effect and switch between default/custom colour palettes.
 - **Resize**: Drag the bottom-right corner. Size persists across sessions.
@@ -104,11 +104,19 @@ Enables MIDI note control of shift frequency. Incoming notes set frequency to `4
 
 **MIDI Channel**: Click the channel display to select channel 1–16, or OMNI (all channels).
 
+### ALIGN (default: ON)
+
+Phase alignment between dry and wet signals. When ON, the dry signal is delayed by 64 samples to match the Hilbert FIR group delay, so dry and wet are phase-coherent. When OFF, the dry signal is undelayed, producing comb-filtering at intermediate MIX values (a creative effect used by some frequency shifter plugins).
+
+### PDC (default: ON)
+
+Plugin Delay Compensation. When ON, reports 64 samples of latency to the DAW, allowing automatic delay compensation across tracks. When OFF, no latency is reported (useful if manual compensation is preferred or to reduce DAW latency overhead).
+
 ## Technical Details
 
 ### DSP Architecture
 - **Hilbert Transform**: 128-tap FIR filter with Blackman windowing. Antisymmetric tap folding reduces 128 MACs to ~32 per channel per sample.
-- **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix.
+- **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix (when ALIGN is ON).
 - **Oscillator**: Band-limited morphing waveform (sine → triangle → square → sawtooth) with per-sample phase accumulation.
 - **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, and mix parameters.
 

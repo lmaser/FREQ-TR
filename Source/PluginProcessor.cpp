@@ -126,6 +126,8 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	syncParam    = apvts.getRawParameterValue (kParamSync);
 	retrigParam  = apvts.getRawParameterValue (kParamRetrig);
 	midiParam    = apvts.getRawParameterValue (kParamMidi);
+	alignParam   = apvts.getRawParameterValue (kParamAlign);
+	pdcParam     = apvts.getRawParameterValue (kParamPdc);
 
 	uiWidthParam   = apvts.getRawParameterValue (kParamUiWidth);
 	uiHeightParam  = apvts.getRawParameterValue (kParamUiHeight);
@@ -240,6 +242,10 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	smoothedEngine = 0.0f;
 	smoothedShape = 0.0f;
 	smoothedMix = 1.0f;
+
+	// Report latency if PDC enabled
+	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
+	setLatencySamples (pdcEnabled ? kHilbertDelay : 0);
 }
 
 void FREQTRAudioProcessor::releaseResources()
@@ -332,7 +338,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float shape  = loadAtomicOrDefault (shapeParam, kShapeDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
-	const bool  syncEnabled = loadBoolParamOrDefault (syncParam, false);
+	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
+	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
+	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
+
+	setLatencySamples (pdcEnabled ? kHilbertDelay : 0);
 
 	useSyncRetrigPhase = false; // reset per block; set true if SYNC+RETRIG+PPQ
 
@@ -506,9 +516,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			wetR = amR + smoothedEngine * (fsR - amR);
 		}
 
-		// ── Mix (realL/R = latency-compensated dry signal) ──
-		const float outL = realL + smoothedMix * (wetL - realL);
-		const float outR = realR + smoothedMix * (wetR - realR);
+		// ── Mix (dry = delayed or direct depending on ALIGN) ──
+		const float dryL = alignEnabled ? realL : inL;
+		const float dryR = alignEnabled ? realR : inR;
+		const float outL = dryL + smoothedMix * (wetL - dryL);
+		const float outR = dryR + smoothedMix * (wetR - dryR);
 
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
@@ -612,6 +624,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSync, "Sync", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamRetrig, "Retrig", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamAlign, "Align", true));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamPdc, "PDC", true));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

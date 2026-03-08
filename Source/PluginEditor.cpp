@@ -345,9 +345,13 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 
     syncButton.setButtonText ("");
     midiButton.setButtonText ("");
+    alignButton.setButtonText ("");
+    pdcButton.setButtonText ("");
 
     addAndMakeVisible (syncButton);
     addAndMakeVisible (midiButton);
+    addAndMakeVisible (alignButton);
+    addAndMakeVisible (pdcButton);
 
     // MIDI channel tooltip overlay
     const int savedChannel = audioProcessor.getMidiChannel();
@@ -399,8 +403,10 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         attachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, paramId, button);
     };
 
-    bindButton (syncAttachment, FREQTRAudioProcessor::kParamSync, syncButton);
-    bindButton (midiAttachment, FREQTRAudioProcessor::kParamMidi, midiButton);
+    bindButton (syncAttachment,  FREQTRAudioProcessor::kParamSync,  syncButton);
+    bindButton (midiAttachment,  FREQTRAudioProcessor::kParamMidi,  midiButton);
+    bindButton (alignAttachment, FREQTRAudioProcessor::kParamAlign, alignButton);
+    bindButton (pdcAttachment,   FREQTRAudioProcessor::kParamPdc,   pdcButton);
 
     for (auto* paramId : kUiMirrorParamIds)
         audioProcessor.apvts.addParameterListener (paramId, this);
@@ -527,10 +533,10 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
         promptOverlay.toFront (false);
 
     const bool enableControls = ! shouldBeActive;
-    const std::array<juce::Component*, 9> interactiveControls {
+    const std::array<juce::Component*, 11> interactiveControls {
         &freqSlider, &modSlider, &engineSlider, &styleSlider,
         &shapeSlider, &polaritySlider, &mixSlider,
-        &syncButton, &midiButton
+        &syncButton, &midiButton, &alignButton, &pdcButton
     };
     for (auto* control : interactiveControls)
         control->setEnabled (enableControls);
@@ -2477,6 +2483,20 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // ALIGN label click → toggle
+    if (getAlignLabelArea().contains (pt))
+    {
+        alignButton.setToggleState (! alignButton.getToggleState(), juce::sendNotificationSync);
+        return;
+    }
+
+    // PDC label click → toggle
+    if (getPdcLabelArea().contains (pt))
+    {
+        pdcButton.setToggleState (! pdcButton.getToggleState(), juce::sendNotificationSync);
+        return;
+    }
+
     // Left-click on value area → remember value for drag
     if (auto* slider = getSliderForValueAreaPoint (pt))
     {
@@ -2596,8 +2616,9 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY)
 
     m.box = juce::jlimit (40, kToggleBoxPx, (int) std::round (editorH * 0.085));
     m.btnRowGap = juce::jlimit (4, 14, (int) std::round (editorH * 0.008));
-    // Only 1 button row for FREQ-TR (SYNC + MIDI)
-    m.btnRow1Y = editorH - m.bottomMargin - m.box;
+    // 2 button rows: row1 = SYNC+MIDI, row2 = ALIGN+PDC
+    m.btnRow2Y = editorH - m.bottomMargin - m.box;
+    m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
     m.availableForSliders = juce::jmax (40, m.btnRow1Y - m.betweenSlidersAndButtons - m.topMargin);
 
     const int nominalStack = kNumBars * nominalBarH + (kNumBars - 1) * nominalGapY;
@@ -2709,6 +2730,16 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getSyncLabelArea() const
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getMidiLabelArea() const
 {
     return makeToggleLabelArea (midiButton, getWidth() - kToggleLegendCollisionPadPx, "MIDI", "MD");
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getAlignLabelArea() const
+{
+    return makeToggleLabelArea (alignButton, pdcButton.getX() - kToggleLegendCollisionPadPx, "ALIGN", "ALN");
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getPdcLabelArea() const
+{
+    return makeToggleLabelArea (pdcButton, getWidth() - kToggleLegendCollisionPadPx, "PDC", "PD");
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getInfoIconArea() const
@@ -2910,6 +2941,8 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
 
         const int syncCR  = midiButton.getX() - kToggleLegendCollisionPadPx;
         const int midiCR  = W - kToggleLegendCollisionPadPx;
+        const int alignCR = pdcButton.getX() - kToggleLegendCollisionPadPx;
+        const int pdcCR   = W - kToggleLegendCollisionPadPx;
 
         auto drawToggleLabel = [&] (const juce::ToggleButton& btn,
                                      const juce::String& text,
@@ -2927,8 +2960,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             }
         };
 
-        drawToggleLabel (syncButton, "SYNC", syncCR);
-        drawToggleLabel (midiButton, "MIDI", midiCR);
+        drawToggleLabel (syncButton,  "SYNC",  syncCR);
+        drawToggleLabel (midiButton,  "MIDI",  midiCR);
+        drawToggleLabel (alignButton, "ALIGN", alignCR);
+        drawToggleLabel (pdcButton,   "PDC",   pdcCR);
     }
 
     // ── Info gear icon ──
@@ -2991,7 +3026,7 @@ void FREQTRAudioProcessorEditor::resized()
     polaritySlider.setBounds (horizontalLayout.leftX, verticalLayout.topY + 5 * (verticalLayout.barH + verticalLayout.gapY), horizontalLayout.barW, verticalLayout.barH);
     mixSlider.setBounds      (horizontalLayout.leftX, verticalLayout.topY + 6 * (verticalLayout.barH + verticalLayout.gapY), horizontalLayout.barW, verticalLayout.barH);
 
-    // Button area: 1 row — SYNC (left) + MIDI (right)
+    // Button area: 2 rows — row1: SYNC+MIDI, row2: ALIGN+PDC
     const int buttonAreaX = horizontalLayout.leftX;
 
     const int toggleVisualSide = juce::jlimit (14,
@@ -3002,8 +3037,10 @@ void FREQTRAudioProcessorEditor::resized()
     const int leftBlockX = buttonAreaX;
     const int rightBlockX = horizontalLayout.leftX + horizontalLayout.barW + horizontalLayout.valuePad;
 
-    syncButton.setBounds (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
-    midiButton.setBounds (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+    syncButton.setBounds  (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+    midiButton.setBounds  (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+    alignButton.setBounds (leftBlockX,  verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
+    pdcButton.setBounds   (rightBlockX, verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
 
     // Retrig tooltip overlay
     {

@@ -23,6 +23,8 @@ public:
 	static constexpr const char* kParamSync      = "sync";
 	static constexpr const char* kParamRetrig    = "retrig";
 	static constexpr const char* kParamMidi      = "midi";
+	static constexpr const char* kParamAlign     = "align";
+	static constexpr const char* kParamPdc       = "pdc";
 
 	// UI state parameters (hidden from DAW automation)
 	static constexpr const char* kParamUiWidth   = "ui_width";
@@ -182,6 +184,8 @@ private:
 	std::atomic<float>* syncParam    = nullptr;
 	std::atomic<float>* retrigParam  = nullptr;
 	std::atomic<float>* midiParam    = nullptr;
+	std::atomic<float>* alignParam   = nullptr;
+	std::atomic<float>* pdcParam     = nullptr;
 
 	std::atomic<float>* uiWidthParam   = nullptr;
 	std::atomic<float>* uiHeightParam  = nullptr;

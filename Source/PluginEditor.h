@@ -120,6 +120,10 @@ private:
     juce::ToggleButton syncButton;
     juce::ToggleButton midiButton;
 
+    // 2 checkboxes: ALIGN, PDC
+    juce::ToggleButton alignButton;
+    juce::ToggleButton pdcButton;
+
     juce::Label midiChannelDisplay;
     juce::Label retrigDisplay;
 
@@ -137,6 +141,8 @@ private:
 
     std::unique_ptr<ButtonAttachment> syncAttachment;
     std::unique_ptr<ButtonAttachment> midiAttachment;
+    std::unique_ptr<ButtonAttachment> alignAttachment;
+    std::unique_ptr<ButtonAttachment> pdcAttachment;
 
     juce::ComponentBoundsConstrainer resizeConstrainer;
     std::unique_ptr<juce::ResizableCornerComponent> resizerCorner;
@@ -284,6 +290,8 @@ private:
     juce::Slider* getSliderForValueAreaPoint (juce::Point<int> p);
     juce::Rectangle<int> getSyncLabelArea() const;
     juce::Rectangle<int> getMidiLabelArea() const;
+    juce::Rectangle<int> getAlignLabelArea() const;
+    juce::Rectangle<int> getPdcLabelArea() const;
     juce::Rectangle<int> getInfoIconArea() const;
     void updateInfoIconCache();
     bool refreshLegendTextCache();

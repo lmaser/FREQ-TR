@@ -20,6 +20,8 @@ public:
 	static constexpr const char* kParamShape     = "shape";
 	static constexpr const char* kParamPolarity  = "polarity";
 	static constexpr const char* kParamMix       = "mix";
+	static constexpr const char* kParamInput     = "input";
+	static constexpr const char* kParamOutput    = "output";
 	static constexpr const char* kParamSync      = "sync";
 	static constexpr const char* kParamRetrig    = "retrig";
 	static constexpr const char* kParamMidi      = "midi";
@@ -66,6 +68,14 @@ public:
 	static constexpr float kMixMin     = 0.0f;
 	static constexpr float kMixMax     = 1.0f;
 	static constexpr float kMixDefault = 1.0f;
+
+	static constexpr float kInputMin     = -100.0f;
+	static constexpr float kInputMax     = 0.0f;
+	static constexpr float kInputDefault = 0.0f;
+
+	static constexpr float kOutputMin     = -100.0f;
+	static constexpr float kOutputMax     = 24.0f;
+	static constexpr float kOutputDefault = 0.0f;
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -118,6 +128,9 @@ public:
 	void setMidiChannel (int channel);
 	int getMidiChannel() const noexcept;
 
+	void setUiIoExpanded (bool expanded);
+	bool getUiIoExpanded() const noexcept;
+
 	void setUiCustomPaletteColour (int index, juce::Colour colour);
 	juce::Colour getUiCustomPaletteColour (int index) const noexcept;
 
@@ -132,6 +145,7 @@ private:
 		static constexpr const char* useCustomPalette = "uiUseCustomPalette";
 		static constexpr const char* crtEnabled = "uiFxTailEnabled";
 		static constexpr const char* midiPort = "midiPort";
+		static constexpr const char* ioExpanded = "uiIoExpanded";
 		static constexpr std::array<const char*, 2> customPalette {
 			"uiCustomPalette0", "uiCustomPalette1"
 		};
@@ -162,6 +176,8 @@ private:
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
 	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
+	float smoothedInputGain = 1.0f;  // EMA-smoothed input gain (linear)
+	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
 
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ
@@ -181,6 +197,8 @@ private:
 	std::atomic<float>* shapeParam   = nullptr;
 	std::atomic<float>* polarityParam = nullptr;
 	std::atomic<float>* mixParam     = nullptr;
+	std::atomic<float>* inputParam   = nullptr;
+	std::atomic<float>* outputParam  = nullptr;
 	std::atomic<float>* syncParam    = nullptr;
 	std::atomic<float>* retrigParam  = nullptr;
 	std::atomic<float>* midiParam    = nullptr;

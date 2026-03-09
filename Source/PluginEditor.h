@@ -58,6 +58,17 @@ private:
 
         juce::String getTextFromValue (double v) override
         {
+            if (owner != nullptr && (this == &owner->inputSlider || this == &owner->outputSlider))
+            {
+                juce::String t (v, 1);
+                if (t.containsChar ('.'))
+                {
+                    while (t.endsWithChar ('0')) t = t.dropLastCharacters (1);
+                    if (t.endsWithChar ('.')) t = t.dropLastCharacters (1);
+                }
+                return t;
+            }
+
             if (owner != nullptr && (this == &owner->mixSlider))
             {
                 double percent = v * 100.0;
@@ -107,14 +118,16 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 7 bars: FREQ, MOD, ENGINE, STYLE, SHAPE, POLARITY, MIX
+    // 9 bars: INPUT, OUTPUT, MIX, FREQ, MOD, ENGINE, SHAPE, POLARITY, STYLE
+    BarSlider inputSlider;
+    BarSlider outputSlider;
+    BarSlider mixSlider;
     BarSlider freqSlider;
     BarSlider modSlider;
     BarSlider engineSlider;
-    BarSlider styleSlider;
     BarSlider shapeSlider;
     BarSlider polaritySlider;
-    BarSlider mixSlider;
+    BarSlider styleSlider;
 
     // 2 checkboxes: SYNC, MIDI
     juce::ToggleButton syncButton;
@@ -138,6 +151,8 @@ private:
     std::unique_ptr<SliderAttachment> shapeAttachment;
     std::unique_ptr<SliderAttachment> polarityAttachment;
     std::unique_ptr<SliderAttachment> mixAttachment;
+    std::unique_ptr<SliderAttachment> inputAttachment;
+    std::unique_ptr<SliderAttachment> outputAttachment;
 
     std::unique_ptr<ButtonAttachment> syncAttachment;
     std::unique_ptr<ButtonAttachment> midiAttachment;
@@ -177,10 +192,12 @@ private:
         int barH = 0;
         int gapY = 0;
         int topY = 0;
+        int toggleBarH = 0;
+        int toggleBarY = 0;
     };
 
     static HorizontalLayoutMetrics buildHorizontalLayout (int editorW, int valueColW);
-    static VerticalLayoutMetrics buildVerticalLayout (int editorH, int biasY);
+    static VerticalLayoutMetrics buildVerticalLayout (int editorH, int biasY, bool ioExpanded);
     void updateCachedLayout();
 
     class MinimalLNF : public juce::LookAndFeel_V4
@@ -274,6 +291,12 @@ private:
     juce::String getMixText() const;
     juce::String getMixTextShort() const;
 
+    juce::String getInputText() const;
+    juce::String getInputTextShort() const;
+
+    juce::String getOutputText() const;
+    juce::String getOutputTextShort() const;
+
     int getTargetValueColumnWidth() const;
 
     void sliderValueChanged (juce::Slider* slider) override;
@@ -317,6 +340,13 @@ private:
     juce::String cachedMixTextFull;
     juce::String cachedMixTextShort;
 
+    juce::String cachedInputTextFull;
+    juce::String cachedInputTextShort;
+    juce::String cachedInputIntOnly;
+    juce::String cachedOutputTextFull;
+    juce::String cachedOutputTextShort;
+    juce::String cachedOutputIntOnly;
+
     juce::String cachedMidiDisplay;
 
     mutable std::uint64_t cachedValueColumnWidthKey = 0;
@@ -324,7 +354,11 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 7> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 9> cachedValueAreas_;
+
+    // IO collapsible section state
+    juce::Rectangle<int> cachedToggleBarArea_;
+    bool ioSectionExpanded_ = false;
 
     static constexpr double kDefaultPolarity = (double) FREQTRAudioProcessor::kPolarityDefault;
 

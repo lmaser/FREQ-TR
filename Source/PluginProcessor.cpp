@@ -123,6 +123,8 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	shapeParam   = apvts.getRawParameterValue (kParamShape);
 	polarityParam = apvts.getRawParameterValue (kParamPolarity);
 	mixParam     = apvts.getRawParameterValue (kParamMix);
+	inputParam   = apvts.getRawParameterValue (kParamInput);
+	outputParam  = apvts.getRawParameterValue (kParamOutput);
 	syncParam    = apvts.getRawParameterValue (kParamSync);
 	retrigParam  = apvts.getRawParameterValue (kParamRetrig);
 	midiParam    = apvts.getRawParameterValue (kParamMidi);
@@ -242,6 +244,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	smoothedEngine = 0.0f;
 	smoothedShape = 0.0f;
 	smoothedMix = 1.0f;
+	smoothedInputGain = 1.0f;
+	smoothedOutputGain = 1.0f;
 
 	// Report latency if PDC enabled
 	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
@@ -338,6 +342,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float shape  = loadAtomicOrDefault (shapeParam, kShapeDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
+	const float inputDb  = loadAtomicOrDefault (inputParam, kInputDefault);
+	const float outputDb = loadAtomicOrDefault (outputParam, kOutputDefault);
+	const float inputGain  = juce::Decibels::decibelsToGain (inputDb, -100.0f);
+	const float outputGain = juce::Decibels::decibelsToGain (outputDb, -100.0f);
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
 	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
@@ -446,6 +454,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		smoothedEngine = paramCoeff * smoothedEngine + (1.0f - paramCoeff) * engine;
 		smoothedShape  = paramCoeff * smoothedShape  + (1.0f - paramCoeff) * shape;
 		smoothedMix    = paramCoeff * smoothedMix    + (1.0f - paramCoeff) * mix;
+		smoothedInputGain  = paramCoeff * smoothedInputGain  + (1.0f - paramCoeff) * inputGain;
+		smoothedOutputGain = paramCoeff * smoothedOutputGain + (1.0f - paramCoeff) * outputGain;
 
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
@@ -523,10 +533,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		// ── Mix (dry = delayed or direct depending on ALIGN) ──
+		// Input/Output gain only affect WET (same as ECHO-TR/DISP-TR)
 		const float dryL = alignEnabled ? realL : inL;
 		const float dryR = alignEnabled ? realR : inR;
-		const float outL = dryL + smoothedMix * (wetL - dryL);
-		const float outR = dryR + smoothedMix * (wetR - dryR);
+		const float wetGainedL = wetL * smoothedInputGain * smoothedOutputGain;
+		const float wetGainedR = wetR * smoothedInputGain * smoothedOutputGain;
+		const float outL = dryL + smoothedMix * (wetGainedL - dryL);
+		const float outR = dryR + smoothedMix * (wetGainedR - dryR);
 
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
@@ -627,6 +640,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kParamMix, "Mix",
 		juce::NormalisableRange<float> (kMixMin, kMixMax, 0.0f, 1.0f), kMixDefault));
 
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamInput, "Input",
+		juce::NormalisableRange<float> (kInputMin, kInputMax, 0.0f, 2.5f), kInputDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamOutput, "Output",
+		juce::NormalisableRange<float> (kOutputMin, kOutputMax, 0.0f, 3.23f), kOutputDefault));
+
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSync, "Sync", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamRetrig, "Retrig", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
@@ -706,6 +727,18 @@ bool FREQTRAudioProcessor::getUiCrtEnabled() const noexcept
 	const auto fromState = apvts.state.getProperty (UiStateKeys::crtEnabled);
 	if (! fromState.isVoid()) return (bool) fromState;
 	return uiCrtEnabled.load (std::memory_order_relaxed) != 0;
+}
+
+void FREQTRAudioProcessor::setUiIoExpanded (bool expanded)
+{
+	apvts.state.setProperty (UiStateKeys::ioExpanded, expanded, nullptr);
+}
+
+bool FREQTRAudioProcessor::getUiIoExpanded() const noexcept
+{
+	const auto fromState = apvts.state.getProperty (UiStateKeys::ioExpanded);
+	if (! fromState.isVoid()) return (bool) fromState;
+	return false;
 }
 
 void FREQTRAudioProcessor::setMidiChannel (int channel)

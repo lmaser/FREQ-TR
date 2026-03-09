@@ -796,7 +796,7 @@ juce::String FREQTRAudioProcessorEditor::getEngineText() const
     if (val > 0.99f)
         return "FREQ SHIFT ENGINE";
     const int pct = (int) std::lround (val * 100.0);
-    return "AM/FREQ " + juce::String (pct) + "% ENGINE";
+    return "AM|FREQ " + juce::String (pct) + "% ENGINE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
@@ -807,7 +807,7 @@ juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
     if (val > 0.99f)
         return "FREQ SHIFT";
     const int pct = (int) std::lround (val * 100.0);
-    return "AM/FREQ " + juce::String (pct) + "%";
+    return "AM|FREQ " + juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getStyleText() const
@@ -841,7 +841,7 @@ juce::String FREQTRAudioProcessorEditor::getShapeText() const
     if (pct >= 99)
         return juce::String (names[seg + 1]) + " SHAPE";
 
-    return juce::String (names[seg]) + "/" + names[seg + 1] + " " + juce::String (pct) + "% SHAPE";
+    return juce::String (names[seg]) + "|" + names[seg + 1] + " " + juce::String (pct) + "% SHAPE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getShapeTextShort() const
@@ -860,7 +860,7 @@ juce::String FREQTRAudioProcessorEditor::getShapeTextShort() const
     if (pct >= 99)
         return full[seg + 1];
 
-    return juce::String (abbr[seg]) + "/" + abbr[seg + 1] + " " + juce::String (pct) + "%";
+    return juce::String (abbr[seg]) + "|" + abbr[seg + 1] + " " + juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getPolarityText() const

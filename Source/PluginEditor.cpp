@@ -2945,17 +2945,16 @@ void FREQTRAudioProcessorEditor::updateInfoIconCache()
 
     const float cx = area.getCentreX() - (float) area.getX();
     const float cy = area.getCentreY() - (float) area.getY();
-    const float radius = (float) area.getWidth() * 0.38f;
+    const float toothTipR = (float) area.getWidth() * 0.47f;
+    const float toothRootR = toothTipR * 0.78f;
 
     cachedInfoGearPath.clear();
-    const int teeth = 8;
-    const float outerR = radius;
-    const float innerR = radius * 0.68f;
+    constexpr int teeth = 8;
     for (int i = 0; i < teeth * 2; ++i)
     {
         const float angle = (float) i * juce::MathConstants<float>::pi / (float) teeth
                           - juce::MathConstants<float>::halfPi;
-        const float r = (i % 2 == 0) ? outerR : innerR;
+        const float r = (i % 2 == 0) ? toothTipR : toothRootR;
         const float px = cx + r * std::cos (angle);
         const float py = cy + r * std::sin (angle);
         if (i == 0)
@@ -2965,7 +2964,7 @@ void FREQTRAudioProcessorEditor::updateInfoIconCache()
     }
     cachedInfoGearPath.closeSubPath();
 
-    const float holeR = radius * 0.28f;
+    const float holeR = toothTipR * 0.40f;
     cachedInfoGearHole = { cx - holeR, cy - holeR, holeR * 2.0f, holeR * 2.0f };
 }
 

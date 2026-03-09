@@ -1,4 +1,4 @@
-# FREQ-TR v1.0c
+# FREQ-TR v1.1
 
 FREQ-TR is a frequency shifter and amplitude modulator built for spectral manipulation, inharmonic textures, and tonal effects.  
 It combines an FIR Hilbert-transform frequency shifter with a ring/AM modulator, MIDI-controlled pitch, tempo-synced rates, and a minimal CRT-inspired interface.
@@ -17,6 +17,7 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 
 - **Bar sliders**: Click and drag horizontally. Right-click for numeric entry (except STYLE, which is slider-only).
 - **Toggle buttons**: SYNC, MIDI, ALIGN, PDC. Click to enable/disable.
+- **Collapsible INPUT/OUTPUT/MIX section**: Click the toggle bar (triangle) at the top of the slider area to expand or collapse the INPUT, OUTPUT and MIX controls. The expanded/collapsed state persists across sessions and preset changes.
 - **Gear icon** (top-right): Opens the info popup with version, credits, and a link to Graphics settings.
 - **Graphics popup**: Toggle CRT post-processing effect and switch between default/custom colour palettes.
 - **Resize**: Drag the bottom-right corner. Size persists across sessions.
@@ -29,8 +30,22 @@ The value column to the right of each slider shows the current state in context:
 - SHAPE shows the oscillator waveform name.
 - POLARITY shows the current value (−1 to +1).
 - MIX shows percentage.
+- INPUT/OUTPUT show dB values.
 
 ## Parameters
+
+### INPUT (−100 to 0 dB)
+
+Pre-processing gain. Controls how much signal enters the frequency shifter / AM engine.  
+Applied to the wet signal only — the dry signal is unaffected.
+
+### OUTPUT (−100 to +24 dB)
+
+Post-processing gain. Applied to the wet signal only.
+
+### MIX (0–100%)
+
+Dry/wet balance. 0% = fully dry, 100% = fully wet.
 
 ### FREQ (0–5,000 Hz)
 
@@ -129,7 +144,7 @@ Plugin Delay Compensation. When ON, reports 64 samples of latency to the DAW, al
 
 ### State Persistence
 - All parameters saved via JUCE AudioProcessorValueTreeState.
-- UI state (size, palette, CRT toggle, MIDI channel) persisted in the plugin state.
+- UI state (size, palette, CRT toggle, MIDI channel, IO section expanded/collapsed) persisted in the plugin state.
 - Parameter IDs are stable across versions for preset compatibility.
 
 ### Performance

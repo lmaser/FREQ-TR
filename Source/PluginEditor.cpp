@@ -749,7 +749,7 @@ juce::String FREQTRAudioProcessorEditor::getFreqText() const
         return "0 Hz FREQ";
     if (hz >= 1000.0f)
         return juce::String (hz / 1000.0f, 2) + " kHz FREQ";
-    return juce::String (hz, 1) + " Hz FREQ";
+    return juce::String (hz, 2) + " Hz FREQ";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFreqTextShort() const
@@ -769,7 +769,7 @@ juce::String FREQTRAudioProcessorEditor::getFreqTextShort() const
         return "0 Hz";
     if (hz >= 1000.0f)
         return juce::String (hz / 1000.0f, 2) + "kHz";
-    return juce::String (hz, 1) + "Hz";
+    return juce::String (hz, 2) + "Hz";
 }
 
 juce::String FREQTRAudioProcessorEditor::getModText() const
@@ -1518,7 +1518,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
 
         juce::String worstCaseText;
         if (&s == &freqSlider)
-            worstCaseText = isFreqSyncMode ? "1/64T." : "5000.0";
+            worstCaseText = isFreqSyncMode ? "1/64T." : "5000.000";
         else if (&s == &modSlider)
             worstCaseText = "4.00";
         else if (&s == &engineSlider)
@@ -1623,8 +1623,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             {
                 minVal = 0.0;
                 maxVal = 5000.0;
-                maxDecs = 1;
-                maxLen = 6;
+                maxDecs = 3;
+                maxLen = 8; // "5000.000"
             }
         }
         else if (&s == &modSlider)
@@ -2847,7 +2847,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
 
     // Measure worst-case legend widths
     constexpr const char* legends[] = {
-        "5000.0 Hz FREQ", "5.00 kHz FREQ",
+        "5000.00 Hz FREQ", "5.00 kHz FREQ",
         "1/64. FREQ",
         "X4.00 MOD",
         "FREQ SHIFT ENGINE",

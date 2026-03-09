@@ -3159,10 +3159,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
         const auto& labelFont = kBoldFont40();
         g.setFont (labelFont);
 
-        const int syncCR  = midiButton.getX() - kToggleLegendCollisionPadPx;
-        const int midiCR  = W - kToggleLegendCollisionPadPx;
         const int alignCR = pdcButton.getX() - kToggleLegendCollisionPadPx;
         const int pdcCR   = W - kToggleLegendCollisionPadPx;
+        const int syncCR  = midiButton.getX() - kToggleLegendCollisionPadPx;
+        const int midiCR  = W - kToggleLegendCollisionPadPx;
 
         auto drawToggleLabel = [&] (const juce::ToggleButton& btn,
                                      const juce::String& text,
@@ -3180,10 +3180,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             }
         };
 
-        drawToggleLabel (syncButton,  "SYNC",  syncCR);
-        drawToggleLabel (midiButton,  "MIDI",  midiCR);
         drawToggleLabel (alignButton, "ALIGN", alignCR);
         drawToggleLabel (pdcButton,   "PDC",   pdcCR);
+        drawToggleLabel (syncButton,  "SYNC",  syncCR);
+        drawToggleLabel (midiButton,  "MIDI",  midiCR);
     }
 
     // ── Info gear icon ──
@@ -3281,7 +3281,7 @@ void FREQTRAudioProcessorEditor::resized()
         styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
     }
 
-    // Button area: 2 rows — row1: SYNC+MIDI, row2: ALIGN+PDC
+    // Button area: 2 rows — row1: ALIGN+PDC, row2: SYNC+MIDI
     const int buttonAreaX = horizontalLayout.leftX;
 
     const int toggleVisualSide = juce::jlimit (14,
@@ -3292,10 +3292,10 @@ void FREQTRAudioProcessorEditor::resized()
     const int leftBlockX = buttonAreaX;
     const int rightBlockX = horizontalLayout.leftX + horizontalLayout.barW + horizontalLayout.valuePad;
 
-    syncButton.setBounds  (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
-    midiButton.setBounds  (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
-    alignButton.setBounds (leftBlockX,  verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
-    pdcButton.setBounds   (rightBlockX, verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
+    alignButton.setBounds (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+    pdcButton.setBounds   (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
+    syncButton.setBounds  (leftBlockX,  verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
+    midiButton.setBounds  (rightBlockX, verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
 
     // Retrig tooltip overlay
     {

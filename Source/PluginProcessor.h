@@ -55,7 +55,7 @@ public:
 
 	static constexpr int kStyleMin     = 0;
 	static constexpr int kStyleMax     = 2;         // 0 = MONO, 1 = STEREO, 2 = WIDE
-	static constexpr float kStyleDefault = 0.0f;
+	static constexpr float kStyleDefault = 1.0f;
 
 	static constexpr float kShapeMin     = 0.0f;
 	static constexpr float kShapeMax     = 1.0f;

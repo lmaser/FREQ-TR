@@ -16,13 +16,7 @@ namespace InfoContent
     <text>by Nemester</text>
     <link url="https://github.com/lmaser/FREQ-TR">Github Repository</link>
     <separator>&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</separator>
-    <spacer/>
-    <poem>"If you want to find</poem>
-    <poem>the secrets of the universe,</poem>
-    <poem>think in terms of energy,</poem>
-    <poem>frequency and vibration."</poem>
-    <spacer/>
-    <text>&#x2014; Nikola Tesla</text>
+    <link url="https://ko-fi.com/nemester">Support on Ko-fi</link>
   </content>
 </info>
 )xml";

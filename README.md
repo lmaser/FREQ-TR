@@ -1,5 +1,11 @@
 # FREQ-TR v1.1
 
+<br/><br/>
+
+<img width="451" height="676" alt="image" src="https://github.com/user-attachments/assets/2bb952c0-e9c0-47a5-9aaa-b4dc6ee09589" />
+
+<br/><br/>
+
 FREQ-TR is a frequency shifter and amplitude modulator built for spectral manipulation, inharmonic textures, and tonal effects.  
 It combines an FIR Hilbert-transform frequency shifter with a ring/AM modulator, MIDI-controlled pitch, tempo-synced rates, and a minimal CRT-inspired interface.
 

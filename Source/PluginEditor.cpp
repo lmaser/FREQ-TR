@@ -2800,16 +2800,13 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
     m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
     m.availableForSliders = juce::jmax (40, m.btnRow1Y - m.betweenSlidersAndButtons - m.topMargin);
 
-    // Expanded: 10 bars + 11 gaps (9 inter-slider + 2 toggle padding).
-    // Collapsed: 7 bars + 7 gaps (6 inter-slider + 1 toggle-to-slider).
-    //            The toggle bar (20px fixed) is subtracted from available space
-    //            BEFORE scaling so bars/gaps don't overflow.
-    const int numSliders = ioExpanded ? 10 : 7;
-    const int numGaps    = ioExpanded ? 11 : 7;
+    // Bars below toggle: 3 IO bars when expanded, 7 main bars when collapsed.
+    // Toggle bar stays fixed — only bar/gap sizing adapts to the visible count.
+    const int numSliders = ioExpanded ? 3 : 7;
+    const int numGaps    = ioExpanded ? 3 : 7;  // (N-1) inter-slider + 1 toggle-to-first
 
     m.toggleBarH = 20;  // fixed visual height for click area
-    const int spaceForScale = ioExpanded ? m.availableForSliders
-                                         : juce::jmax (40, m.availableForSliders - m.toggleBarH);
+    const int spaceForScale = juce::jmax (40, m.availableForSliders - m.toggleBarH);
 
     const int nominalStack = numSliders * nominalBarH + numGaps * nominalGapY;
     const double stackScale = nominalStack > 0 ? juce::jmin (1.0, (double) spaceForScale / (double) nominalStack)
@@ -2828,10 +2825,7 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
 
     m.topY = m.topMargin;
 
-    if (ioExpanded)
-        m.toggleBarY = m.topY + 3 * m.barH + 3 * m.gapY;
-    else
-        m.toggleBarY = m.topY;  // collapsed: toggle bar flush with content top
+    m.toggleBarY = m.topY;  // toggle bar always at top
 
     return m;
 }
@@ -3278,34 +3272,40 @@ void FREQTRAudioProcessorEditor::resized()
     const auto horizontalLayout = buildHorizontalLayout (W, getTargetValueColumnWidth());
     const auto verticalLayout = buildVerticalLayout (H, kLayoutVerticalBiasPx, ioSectionExpanded_);
 
-    // Position sliders depending on expanded/collapsed IO section
+    // Position sliders — toggle bar always at top, swaps between main and IO bars
     const int step = verticalLayout.barH + verticalLayout.gapY;
+    const int mainTop = verticalLayout.toggleBarY + verticalLayout.toggleBarH + verticalLayout.gapY;
 
     if (ioSectionExpanded_)
     {
-        // Expanded: INPUT → OUTPUT → MIX → [toggle bar + gap] → FREQ → MOD → FEEDBACK → ENGINE → SHAPE → POLARITY → STYLE
+        // Expanded: [toggle bar] → INPUT, OUTPUT, MIX; main params hidden
         inputSlider.setVisible (true);
         outputSlider.setVisible (true);
         mixSlider.setVisible (true);
 
-        inputSlider.setBounds   (horizontalLayout.leftX, verticalLayout.topY + 0 * step, horizontalLayout.barW, verticalLayout.barH);
-        outputSlider.setBounds  (horizontalLayout.leftX, verticalLayout.topY + 1 * step, horizontalLayout.barW, verticalLayout.barH);
-        mixSlider.setBounds     (horizontalLayout.leftX, verticalLayout.topY + 2 * step, horizontalLayout.barW, verticalLayout.barH);
+        inputSlider.setBounds   (horizontalLayout.leftX, mainTop + 0 * step, horizontalLayout.barW, verticalLayout.barH);
+        outputSlider.setBounds  (horizontalLayout.leftX, mainTop + 1 * step, horizontalLayout.barW, verticalLayout.barH);
+        mixSlider.setBounds     (horizontalLayout.leftX, mainTop + 2 * step, horizontalLayout.barW, verticalLayout.barH);
 
-        // Toggle bar sits at toggleBarY; main params resume after toggle bar + gap
-        const int mainTop = verticalLayout.toggleBarY + verticalLayout.toggleBarH + verticalLayout.gapY;
+        freqSlider.setBounds (0, 0, 0, 0);
+        modSlider.setBounds (0, 0, 0, 0);
+        feedbackSlider.setBounds (0, 0, 0, 0);
+        engineSlider.setBounds (0, 0, 0, 0);
+        shapeSlider.setBounds (0, 0, 0, 0);
+        polaritySlider.setBounds (0, 0, 0, 0);
+        styleSlider.setBounds (0, 0, 0, 0);
 
-        freqSlider.setBounds     (horizontalLayout.leftX, mainTop + 0 * step, horizontalLayout.barW, verticalLayout.barH);
-        modSlider.setBounds      (horizontalLayout.leftX, mainTop + 1 * step, horizontalLayout.barW, verticalLayout.barH);
-        feedbackSlider.setBounds (horizontalLayout.leftX, mainTop + 2 * step, horizontalLayout.barW, verticalLayout.barH);
-        engineSlider.setBounds   (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
-        shapeSlider.setBounds    (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
-        polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
-        styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
+        freqSlider.setVisible (false);
+        modSlider.setVisible (false);
+        feedbackSlider.setVisible (false);
+        engineSlider.setVisible (false);
+        shapeSlider.setVisible (false);
+        polaritySlider.setVisible (false);
+        styleSlider.setVisible (false);
     }
     else
     {
-        // Collapsed: [toggle bar] → gap → FREQ → MOD → FEEDBACK → ENGINE → SHAPE → POLARITY → STYLE; IO hidden
+        // Collapsed: [toggle bar] → main params; IO hidden
         inputSlider.setVisible (false);
         outputSlider.setVisible (false);
         mixSlider.setVisible (false);
@@ -3313,7 +3313,13 @@ void FREQTRAudioProcessorEditor::resized()
         outputSlider.setBounds (0, 0, 0, 0);
         mixSlider.setBounds (0, 0, 0, 0);
 
-        const int mainTop = verticalLayout.toggleBarY + verticalLayout.toggleBarH + verticalLayout.gapY;
+        freqSlider.setVisible (true);
+        modSlider.setVisible (true);
+        feedbackSlider.setVisible (true);
+        engineSlider.setVisible (true);
+        shapeSlider.setVisible (true);
+        polaritySlider.setVisible (true);
+        styleSlider.setVisible (true);
 
         freqSlider.setBounds     (horizontalLayout.leftX, mainTop + 0 * step, horizontalLayout.barW, verticalLayout.barH);
         modSlider.setBounds      (horizontalLayout.leftX, mainTop + 1 * step, horizontalLayout.barW, verticalLayout.barH);

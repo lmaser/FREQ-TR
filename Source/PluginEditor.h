@@ -118,12 +118,13 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 9 bars: INPUT, OUTPUT, MIX, FREQ, MOD, ENGINE, SHAPE, POLARITY, STYLE
+    // 10 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
     BarSlider freqSlider;
     BarSlider modSlider;
+    BarSlider feedbackSlider;
     BarSlider engineSlider;
     BarSlider shapeSlider;
     BarSlider polaritySlider;
@@ -146,6 +147,7 @@ private:
     std::unique_ptr<SliderAttachment> freqAttachment;
     std::unique_ptr<SliderAttachment> freqSyncAttachment;
     std::unique_ptr<SliderAttachment> modAttachment;
+    std::unique_ptr<SliderAttachment> feedbackAttachment;
     std::unique_ptr<SliderAttachment> engineAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
     std::unique_ptr<SliderAttachment> shapeAttachment;
@@ -276,6 +278,9 @@ private:
     juce::String getModText() const;
     juce::String getModTextShort() const;
 
+    juce::String getFeedbackText() const;
+    juce::String getFeedbackTextShort() const;
+
     juce::String getEngineText() const;
     juce::String getEngineTextShort() const;
 
@@ -329,6 +334,8 @@ private:
     juce::String cachedFreqTextShort;
     juce::String cachedModTextFull;
     juce::String cachedModTextShort;
+    juce::String cachedFeedbackTextFull;
+    juce::String cachedFeedbackTextShort;
     juce::String cachedEngineTextFull;
     juce::String cachedEngineTextShort;
     juce::String cachedStyleTextFull;
@@ -354,7 +361,7 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 9> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 10> cachedValueAreas_;
 
     // IO collapsible section state
     juce::Rectangle<int> cachedToggleBarArea_;

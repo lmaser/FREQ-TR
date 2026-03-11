@@ -15,6 +15,7 @@ public:
 	static constexpr const char* kParamFreq      = "freq";
 	static constexpr const char* kParamFreqSync   = "freq_sync";
 	static constexpr const char* kParamMod       = "mod";
+	static constexpr const char* kParamFeedback  = "feedback";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamStyle     = "style";
 	static constexpr const char* kParamShape     = "shape";
@@ -49,12 +50,16 @@ public:
 	static constexpr float kModMax     = 1.0f;
 	static constexpr float kModDefault = 0.5f;
 
+	static constexpr float kFeedbackMin     = 0.0f;
+	static constexpr float kFeedbackMax     = 1.0f;
+	static constexpr float kFeedbackDefault = 0.0f;
+
 	static constexpr float kEngineMin     = 0.0f;
 	static constexpr float kEngineMax     = 1.0f;
 	static constexpr float kEngineDefault = 0.0f;   // 0 = AM, 1 = Freq Shift
 
 	static constexpr int kStyleMin     = 0;
-	static constexpr int kStyleMax     = 2;         // 0 = MONO, 1 = STEREO, 2 = WIDE
+	static constexpr int kStyleMax     = 3;         // 0 = MONO, 1 = STEREO, 2 = WIDE, 3 = DUAL
 	static constexpr float kStyleDefault = 1.0f;
 
 	static constexpr float kShapeMin     = 0.0f;
@@ -137,6 +142,9 @@ public:
 	juce::AudioProcessorValueTreeState apvts;
 	static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+	struct BiquadState  { float s1 = 0.0f, s2 = 0.0f; };
+	struct BiquadCoeffs { float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f; };
+
 private:
 	struct UiStateKeys
 	{
@@ -172,12 +180,31 @@ private:
 
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
+	double oscPhaseR = 0.0;        // R-channel phase (WIDE/DUAL: different rate)
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
 	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 	float smoothedInputGain = 1.0f;  // EMA-smoothed input gain (linear)
 	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
+
+	// ── Feedback state ──
+	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;
+	static constexpr double kFeedbackSmoothingSeconds = 0.05;
+	float feedbackLastL = 0.0f;
+	float feedbackLastR = 0.0f;
+
+	// ── Feedback DC blocker (one-pole HP ~5 Hz) ──
+	static constexpr float kFbkDcBlockHz = 5.0f;
+	float fbkDcStateInL  = 0.0f;
+	float fbkDcStateInR  = 0.0f;
+	float fbkDcStateOutL = 0.0f;
+	float fbkDcStateOutR = 0.0f;
+	float fbkDcCoeff     = 0.999f;
+
+	// ── Feedback LPF (2nd-order Butterworth) ──
+	BiquadState  fbkLpStateL, fbkLpStateR;
+	BiquadCoeffs fbkLpCoeffs;
 
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ
@@ -192,6 +219,7 @@ private:
 	// ── Cached parameter pointers ──
 	std::atomic<float>* freqParam    = nullptr;
 	std::atomic<float>* modParam     = nullptr;
+	std::atomic<float>* feedbackParam = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
 	std::atomic<float>* shapeParam   = nullptr;

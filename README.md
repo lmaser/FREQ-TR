@@ -1,4 +1,4 @@
-# FREQ-TR v1.1
+# FREQ-TR v1.2
 
 <br/><br/>
 
@@ -31,8 +31,9 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 The value column to the right of each slider shows the current state in context:
 - FREQ shows hertz (or MIDI note name when active, or sync division name).
 - MOD shows the frequency multiplier.
+- FEEDBACK shows percentage.
 - ENGINE shows AM/FREQ SHIFT blend percentage.
-- STYLE shows MONO/STEREO/WIDE.
+- STYLE shows MONO/STEREO/WIDE/DUAL.
 - SHAPE shows the oscillator waveform name.
 - POLARITY shows the current value (−1 to +1).
 - MIX shows percentage.
@@ -71,6 +72,17 @@ The sync value is converted to hertz via `1000 / durationMs`.
 Frequency multiplier applied to the shift frequency.  
 0% = ×0.25 (4× lower frequency), 50% = ×1.0 (no change), 100% = ×4.0 (4× higher frequency).
 
+### FEEDBACK (0–100%)
+
+Feeds the wet output back into the Hilbert transform input. The feedback amount follows a smoothstep curve (3x²−2x³) for natural-feeling control response.
+
+- **Freq Shift mode**: Creates cascading barberpole effects — each feedback iteration shifts the signal further, producing stacked inharmonic partials.
+- **AM mode**: Produces increasingly metallic and inharmonic textures as the ring-modulated signal is re-modulated on each pass.
+
+The Hilbert FIR's 64-sample group delay (~1.5 ms at 44.1 kHz) acts as the natural feedback delay, keeping the loop tight and responsive.
+
+The feedback path includes a one-pole DC blocker at ~5 Hz and a safety limiter at ±4.0. The effective maximum feedback is capped at 97% internally to compensate for the Hilbert FIR's passband ripple, ensuring stable sustain without divergence.
+
 ### ENGINE (0–100%)
 
 Blend between amplitude modulation and frequency shifting.  
@@ -83,7 +95,8 @@ Blend between amplitude modulation and frequency shifting.
 Routing topology:
 - **MONO**: Single processing path, summed to both channels.
 - **STEREO**: Independent left/right processing with shared oscillator.
-- **WIDE**: Opposite frequency shifts per channel (L shifts up, R shifts down). Creates a wide stereo image through decorrelated sidebands. In AM mode, the right channel uses an inverted carrier.
+- **WIDE**: Opposite sidebands per channel (L = upper sideband, R = lower sideband) with cross-feedback. Acts as a dimension expander: the shift affects mainly the side signal (L−R) while leaving the mid (L+R) relatively intact. In AM mode, the right channel uses an inverted carrier for the same mid/side effect.
+- **DUAL**: R channel shifts at half (×0.5) the L shift frequency, with independent per-channel feedback. Two separate frequency-shifted textures, one per channel.
 
 ### SHAPE (0–100%)
 

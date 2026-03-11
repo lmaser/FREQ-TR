@@ -118,6 +118,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 {
 	freqParam    = apvts.getRawParameterValue (kParamFreq);
 	modParam     = apvts.getRawParameterValue (kParamMod);
+	feedbackParam = apvts.getRawParameterValue (kParamFeedback);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
 	shapeParam   = apvts.getRawParameterValue (kParamShape);
@@ -240,12 +241,38 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 	hilbertPos = 0;
 	oscPhase = 0.0;
+	oscPhaseR = 0.0;
 	smoothedFreq = 0.0f;
 	smoothedEngine = 0.0f;
 	smoothedShape = 0.0f;
 	smoothedMix = 1.0f;
 	smoothedInputGain = 1.0f;
 	smoothedOutputGain = 1.0f;
+
+	feedbackSmoothed.reset (currentSampleRate, kFeedbackSmoothingSeconds);
+	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (0.0f, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
+	feedbackLastL = 0.0f;
+	feedbackLastR = 0.0f;
+
+	// DC blocker coefficient: R = e^(-2π * fHP / fs)
+	fbkDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * kFbkDcBlockHz / (float) currentSampleRate);
+	fbkDcStateInL = fbkDcStateInR = fbkDcStateOutL = fbkDcStateOutR = 0.0f;
+
+	// Feedback LPF: 2nd-order Butterworth at 0.35 × fs
+	// Transparent below ~14 kHz, steep -12 dB/oct rolloff above, null at Nyquist.
+	{
+		const float fc = (float) currentSampleRate * 0.35f;
+		const float K  = std::tan (juce::MathConstants<float>::pi * fc / (float) currentSampleRate);
+		const float K2 = K * K;
+		const float sqrt2K = std::sqrt (2.0f) * K;
+		const float norm   = 1.0f / (1.0f + sqrt2K + K2);
+		fbkLpCoeffs.b0 = K2 * norm;
+		fbkLpCoeffs.b1 = 2.0f * fbkLpCoeffs.b0;
+		fbkLpCoeffs.b2 = fbkLpCoeffs.b0;
+		fbkLpCoeffs.a1 = 2.0f * (K2 - 1.0f) * norm;
+		fbkLpCoeffs.a2 = (1.0f - sqrt2K + K2) * norm;
+	}
+	fbkLpStateL = fbkLpStateR = {};
 
 	// Report latency if PDC enabled
 	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
@@ -281,6 +308,26 @@ bool FREQTRAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 #endif
 
 //==============================================================================
+namespace
+{
+    inline float dcBlockTick (float in, float& inState, float& outState, float r) noexcept
+    {
+        outState = r * (outState + in - inState);
+        inState = in;
+        return outState;
+    }
+
+    // Direct Form II Transposed biquad (numerically stable at high frequencies)
+    inline float biquadTick (float x, FREQTRAudioProcessor::BiquadState& st,
+                             const FREQTRAudioProcessor::BiquadCoeffs& c) noexcept
+    {
+        const float y = c.b0 * x + st.s1;
+        st.s1 = c.b1 * x - c.a1 * y + st.s2;
+        st.s2 = c.b2 * x - c.a2 * y;
+        return y;
+    }
+}
+
 void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
 	juce::ScopedNoDenormals noDenormals;
@@ -337,6 +384,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	// ── Read parameters ──
 	float targetFreq   = loadAtomicOrDefault (freqParam, kFreqDefault);
 	const float modVal = loadAtomicOrDefault (modParam, kModDefault);
+	const float rawFeedback = juce::jlimit (0.0f, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
+	// Smoothstep 3x²−2x³, capped at 0.99 (LPF handles HF accumulation)
+	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float shape  = loadAtomicOrDefault (shapeParam, kShapeDefault);
@@ -441,6 +491,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	// EMA coefficient for mix/engine/shape (~5 ms)
 	const float paramCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
 
+	feedbackSmoothed.setTargetValue (targetFeedback);
+
 	const int order = kHilbertOrder;
 	const int half  = order / 2;
 	const float invSr = 1.0f / (float) currentSampleRate;
@@ -464,12 +516,28 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			oscPhase -= std::floor (oscPhase);
 		}
 
+		// R-channel phase: only DUAL uses a different rate (×0.5)
+		// WIDE uses the same oscillator as L (opposite sideband, not different rate)
+		const float rFreqRatio = (style == 3) ? 0.5f : 1.0f;
+		if (useSyncRetrigPhase)
+		{
+			oscPhaseR = syncRetrigPhase + (double) (smoothedFreq * rFreqRatio) * ((double) n * (double) invSr);
+			oscPhaseR -= std::floor (oscPhaseR);
+		}
+
 		const float inL = (writeL != nullptr) ? writeL[n] : 0.0f;
 		const float inR = (writeR != nullptr) ? writeR[n] : inL;
 
+		// Feedback: cross for WIDE, independent otherwise
+		const float fb = feedbackSmoothed.getNextValue();
+		const float fbSrcL = (style == 2) ? feedbackLastR : feedbackLastL;
+		const float fbSrcR = (style == 2) ? feedbackLastL : feedbackLastR;
+		const float fbInL = inL + fb * fbSrcL;
+		const float fbInR = inR + fb * fbSrcR;
+
 		// Write into circular Hilbert input buffer
-		hilbertBufL[(size_t) hilbertPos] = inL;
-		hilbertBufR[(size_t) hilbertPos] = inR;
+		hilbertBufL[(size_t) hilbertPos] = fbInL;
+		hilbertBufR[(size_t) hilbertPos] = fbInR;
 
 		// ── Hilbert FIR convolution (90° path) — folded antisymmetric taps ──
 		float hilbL = 0.0f, hilbR = 0.0f;
@@ -488,9 +556,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float realL = hilbertBufL[(size_t) delayIdx];
 		const float realR = hilbertBufR[(size_t) delayIdx];
 
-		// ── Oscillator ──
+		// ── Oscillator (L channel / shared) ──
 		const float oscCos = std::cos ((float) oscPhase * juce::MathConstants<float>::twoPi);
 		const float oscSin = std::sin ((float) oscPhase * juce::MathConstants<float>::twoPi);
+
+		// ── Oscillator R (only distinct from L in DUAL mode) ──
+		const float oscCosR = std::cos ((float) oscPhaseR * juce::MathConstants<float>::twoPi);
+		const float oscSinR = std::sin ((float) oscPhaseR * juce::MathConstants<float>::twoPi);
 
 		// Peak-normalization factor for current smoothed shape
 		const float curShapeIdx = smoothedShape * (float) kShapeTableSize;
@@ -500,40 +572,50 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float curShapeGain = shapeGainTable[(size_t) csi0]
 							  + csiFrac * (shapeGainTable[(size_t) csi1] - shapeGainTable[(size_t) csi0]);
 
-		// Morphed waveform (for AM mode) — peak-normalized
-		const float oscWave = morphedWave ((float) oscPhase, smoothedShape) * curShapeGain;
+		// Morphed waveforms (peak-normalized)
+		const float oscWave  = morphedWave ((float) oscPhase,  smoothedShape) * curShapeGain;
+		const float oscWaveR = morphedWave ((float) oscPhaseR, smoothedShape) * curShapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
-		//  style: 0 = MONO (L copied to R), 1 = STEREO (same shift both), 2 = WIDE (opposite shift R)
-		const bool useStereoInput = (style >= 1);   // STEREO and WIDE both use independent L/R
+		//  0=MONO, 1=STEREO (same shift both), 2=WIDE (opposite sideband + cross-fbk), 3=DUAL (×0.5 + independent)
+		const bool useStereoInput = (style >= 1);
 		float wetL, wetR;
 
 		if (std::abs (smoothedFreq) < 0.001f)
 		{
-			// Bypass when frequency ≈ 0 to avoid silence from AM mode (sin(0)=0)
 			wetL = realL;
 			wetR = useStereoInput ? realR : realL;
 		}
 		else
 		{
-			// AM: input * wave  (ring modulation at engine=0)
+			// AM: input × wave (ring modulation at engine=0)
 			const float amL = realL * oscWave;
-			const float amR = useStereoInput ? (realR * (style == 2 ? -oscWave : oscWave)) : amL;
+			const float amR = useStereoInput
+				? (style == 2 ? (realR * -oscWave)                // WIDE: inverted carrier → side enhancement
+				  : (style == 3 ? (realR * oscWaveR)              // DUAL: independent oscillator
+				                : (realR * oscWave)))              // STEREO: shared oscillator
+				: amL;                                             // MONO
 
-			// Freq Shift: Re[ analytic * e^(j2πft) ] = real*cos - hilbert*sin
-			// WIDE: R uses +sin (opposite sideband) → real*cos + hilbert*sin
+			// Freq Shift: Re[ analytic × e^(j2πft) ] = real·cos − hilbert·sin
+			// WIDE: R uses opposite sideband (real·cos + hilbert·sin) → lower sideband
 			const float fsL = realL * oscCos - hilbL * oscSin;
 			const float fsR = useStereoInput
-				? (style == 2 ? (realR * oscCos + hilbR * oscSin)
-				               : (realR * oscCos - hilbR * oscSin))
-				: fsL;
+				? (style == 2 ? (realR * oscCos + hilbR * oscSin)       // WIDE: lower sideband
+				  : (style == 3 ? (realR * oscCosR - hilbR * oscSinR)   // DUAL: independent shift
+				                : (realR * oscCos - hilbR * oscSin)))    // STEREO: same shift
+				: fsL;                                                   // MONO
 
 			wetL = amL + smoothedEngine * (fsL - amL);
 			wetR = amR + smoothedEngine * (fsR - amR);
 		}
 
+		// Feedback path: biquad LPF (kill HF near Nyquist) → DC blocker → safety limiter
+		feedbackLastL = juce::jlimit (-4.0f, 4.0f,
+			dcBlockTick (biquadTick (wetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
+		feedbackLastR = juce::jlimit (-4.0f, 4.0f,
+			dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
+
 		// ── Mix (dry = delayed or direct depending on ALIGN) ──
-		// Input/Output gain only affect WET (same as ECHO-TR/DISP-TR)
 		const float dryL = alignEnabled ? realL : inL;
 		const float dryR = alignEnabled ? realR : inR;
 		const float wetGainedL = wetL * smoothedInputGain * smoothedOutputGain;
@@ -549,6 +631,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		{
 			oscPhase += (double) smoothedFreq * (double) invSr;
 			oscPhase -= std::floor (oscPhase);
+
+			oscPhaseR += (double) (smoothedFreq * rFreqRatio) * (double) invSr;
+			oscPhaseR -= std::floor (oscPhaseR);
 		}
 
 		hilbertPos = (hilbertPos + 1) & (order - 1);
@@ -615,13 +700,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamMod, "Mod",
 		juce::NormalisableRange<float> (kModMin, kModMax, 0.0f, 1.0f), kModDefault));
-
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamFeedback, "Feedback",
+		juce::NormalisableRange<float> (0.0f, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
 	// Engine: 0 = AM, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",
 		juce::NormalisableRange<float> (kEngineMin, kEngineMax, 0.0f, 1.0f), kEngineDefault));
 
-	// Style: 0 = Mono, 1 = Stereo
+	// Style: 0 = Mono, 1 = Stereo, 2 = Wide, 3 = Dual
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamStyle, "Style",
 		juce::NormalisableRange<float> ((float) kStyleMin, (float) kStyleMax, 1.0f, 1.0f), kStyleDefault));

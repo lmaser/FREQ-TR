@@ -637,7 +637,8 @@ void FREQTRAudioProcessorEditor::timerCallback()
     if (newMidiDisplay != cachedMidiDisplay)
     {
         cachedMidiDisplay = newMidiDisplay;
-        refreshLegendTextCache();
+        if (refreshLegendTextCache())
+            updateCachedLayout();
         repaint (getRowRepaintBounds (freqSlider));
     }
 

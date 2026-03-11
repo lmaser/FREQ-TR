@@ -410,10 +410,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 	}
 
-	// MOD multiplier (same curve as ECHO-TR/DISP-TR)
+	// MOD multiplier (hyperbolic below centre, linear above — same as ECHO-TR/DISP-TR)
 	float freqMultiplier;
 	if (modVal < 0.5f)
-		freqMultiplier = 0.25f + (modVal * 1.5f);
+		freqMultiplier = 1.0f / (4.0f - 6.0f * modVal);
 	else
 		freqMultiplier = 1.0f + ((modVal - 0.5f) * 6.0f);
 

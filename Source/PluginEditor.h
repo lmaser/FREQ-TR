@@ -31,6 +31,7 @@ private:
     void openMidiChannelPrompt();
     void openRetrigPrompt();
     void scheduleRetrigTipAutoHide();
+    void openFilterPrompt();
     void openInfoPopup();
     void openGraphicsPopup();
     void setPromptOverlayActive (bool shouldBeActive);
@@ -130,6 +131,57 @@ private:
     BarSlider polaritySlider;
     BarSlider styleSlider;
 
+    using FREQScheme = TR::TRScheme;
+
+    // ── Filter bar (dual HP/LP marker component) ──
+    class FilterBarComponent : public juce::Component,
+                               public juce::SettableTooltipClient
+    {
+    public:
+        void setOwner (FREQTRAudioProcessorEditor* o) { owner = o; }
+        void setScheme (const FREQScheme& s) { scheme = s; repaint(); }
+
+        void paint (juce::Graphics& g) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseDoubleClick (const juce::MouseEvent& e) override;
+
+        void updateFromProcessor();
+
+        float getHpFreq() const { return hpFreq_; }
+        float getLpFreq() const { return lpFreq_; }
+        bool  isHpOn()    const { return hpOn_; }
+        bool  isLpOn()    const { return lpOn_; }
+
+    private:
+        FREQTRAudioProcessorEditor* owner = nullptr;
+        FREQScheme scheme {};
+
+        float hpFreq_ = 250.0f;
+        float lpFreq_ = 2000.0f;
+        bool  hpOn_   = false;
+        bool  lpOn_   = false;
+
+        enum DragTarget { None, HP, LP };
+        DragTarget currentDrag_ = None;
+
+        static constexpr float kMinFreq = 20.0f;
+        static constexpr float kMaxFreq = 20000.0f;
+        static constexpr float kPad     = 7.0f;
+        static constexpr int   kMarkerHitPx = 10;
+
+        juce::Rectangle<float> getInnerArea() const;
+        float freqToNormX (float freq) const;
+        float normXToFreq (float normX) const;
+        float getMarkerScreenX (float freq) const;
+        DragTarget hitTestMarker (juce::Point<float> p) const;
+        void  setFreqFromMouseX (float mouseX, DragTarget target);
+    };
+
+    FilterBarComponent filterBar_;
+
     // 2 checkboxes: SYNC, MIDI
     juce::ToggleButton syncButton;
     juce::ToggleButton midiButton;
@@ -163,8 +215,6 @@ private:
 
     juce::ComponentBoundsConstrainer resizeConstrainer;
     std::unique_ptr<juce::ResizableCornerComponent> resizerCorner;
-
-    using FREQScheme = TR::TRScheme;
 
     FREQScheme activeScheme;
 
@@ -354,6 +404,18 @@ private:
     juce::String cachedOutputTextShort;
     juce::String cachedOutputIntOnly;
 
+    juce::String cachedMixIntOnly;
+    juce::String cachedFreqIntOnly;
+    juce::String cachedModIntOnly;
+    juce::String cachedFeedbackIntOnly;
+    juce::String cachedEngineIntOnly;
+    juce::String cachedShapeIntOnly;
+    juce::String cachedPolarityIntOnly;
+    juce::String cachedStyleIntOnly;
+
+    juce::String cachedFilterTextFull;
+    juce::String cachedFilterTextShort;
+
     juce::String cachedMidiDisplay;
 
     mutable std::uint64_t cachedValueColumnWidthKey = 0;
@@ -362,6 +424,7 @@ private:
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
     std::array<juce::Rectangle<int>, 10> cachedValueAreas_;
+    juce::Rectangle<int> cachedFilterValueArea_;
 
     // IO collapsible section state
     juce::Rectangle<int> cachedToggleBarArea_;

@@ -100,6 +100,67 @@ namespace
 			coeffs[i] *= w;
 		}
 	}
+
+	// ── Biquad coefficient calculators for wet HP/LP filters ──
+	using BQC = FREQTRAudioProcessor::WetFilterBiquadCoeffs;
+
+	inline BQC calcOnePoleLP (float freq, float sr)
+	{
+		const float w = juce::MathConstants<float>::twoPi * freq / sr;
+		const float alpha = w / (1.0f + w);
+		return { alpha, 0.0f, 0.0f, -(1.0f - alpha), 0.0f };
+	}
+
+	inline BQC calcOnePoleHP (float freq, float sr)
+	{
+		const float w = juce::MathConstants<float>::twoPi * freq / sr;
+		const float a = 1.0f / (1.0f + w);
+		return { a, -a, 0.0f, -(1.0f - a), 0.0f };
+	}
+
+	inline BQC calcBiquadLP (float freq, float sr, float Q)
+	{
+		const float w0 = juce::MathConstants<float>::twoPi * freq / sr;
+		const float cs = std::cos (w0);
+		const float sn = std::sin (w0);
+		const float alpha = sn / (2.0f * Q);
+		const float a0 = 1.0f + alpha;
+		return { ((1.0f - cs) * 0.5f) / a0,
+				 (1.0f - cs) / a0,
+				 ((1.0f - cs) * 0.5f) / a0,
+				 (-2.0f * cs) / a0,
+				 (1.0f - alpha) / a0 };
+	}
+
+	inline BQC calcBiquadHP (float freq, float sr, float Q)
+	{
+		const float w0 = juce::MathConstants<float>::twoPi * freq / sr;
+		const float cs = std::cos (w0);
+		const float sn = std::sin (w0);
+		const float alpha = sn / (2.0f * Q);
+		const float a0 = 1.0f + alpha;
+		return { ((1.0f + cs) * 0.5f) / a0,
+				 -(1.0f + cs) / a0,
+				 ((1.0f + cs) * 0.5f) / a0,
+				 (-2.0f * cs) / a0,
+				 (1.0f - alpha) / a0 };
+	}
+
+	// 4th-order Butterworth Q values
+	constexpr float kBW4_Q1 = 0.54119610f;   // 1 / (2 cos(3π/8))
+	constexpr float kBW4_Q2 = 1.30656296f;   // 1 / (2 cos(π/8))
+
+	inline float processWetBiquad (const BQC& c,
+								   FREQTRAudioProcessor::WetFilterBiquadState& s,
+								   float x) noexcept
+	{
+		const float y = c.b0 * x + s.z1;
+		s.z1 = c.b1 * x - c.a1 * y + s.z2;
+		s.z2 = c.b2 * x - c.a2 * y;
+		return y;
+	}
+
+	constexpr float kGainSmoothCoeff = 0.9955f;
 }
 
 //==============================================================================
@@ -131,6 +192,12 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	midiParam    = apvts.getRawParameterValue (kParamMidi);
 	alignParam   = apvts.getRawParameterValue (kParamAlign);
 	pdcParam     = apvts.getRawParameterValue (kParamPdc);
+	filterHpFreqParam  = apvts.getRawParameterValue (kParamFilterHpFreq);
+	filterLpFreqParam  = apvts.getRawParameterValue (kParamFilterLpFreq);
+	filterHpSlopeParam = apvts.getRawParameterValue (kParamFilterHpSlope);
+	filterLpSlopeParam = apvts.getRawParameterValue (kParamFilterLpSlope);
+	filterHpOnParam    = apvts.getRawParameterValue (kParamFilterHpOn);
+	filterLpOnParam    = apvts.getRawParameterValue (kParamFilterLpOn);
 
 	uiWidthParam   = apvts.getRawParameterValue (kParamUiWidth);
 	uiHeightParam  = apvts.getRawParameterValue (kParamUiHeight);
@@ -277,6 +344,76 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	// Report latency if PDC enabled
 	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
 	setLatencySamples (pdcEnabled ? kHilbertDelay : 0);
+
+	// Reset wet filter state
+	wetFilterState_[0].reset();
+	wetFilterState_[1].reset();
+	smoothedFilterHpFreq_ = loadAtomicOrDefault (filterHpFreqParam, kFilterHpFreqDefault);
+	smoothedFilterLpFreq_ = loadAtomicOrDefault (filterLpFreqParam, kFilterLpFreqDefault);
+	lastCalcHpFreq_ = -1.0f;
+	lastCalcLpFreq_ = -1.0f;
+	lastCalcHpSlope_ = -1;
+	lastCalcLpSlope_ = -1;
+	filterCoeffCountdown_ = 0;
+	updateFilterCoeffs (true, true);
+}
+
+void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
+{
+	const float sr = (float) currentSampleRate;
+	const int hpSlope = juce::jlimit (kFilterSlopeMin, kFilterSlopeMax,
+									  loadIntParamOrDefault (filterHpSlopeParam, kFilterSlopeDefault));
+	const int lpSlope = juce::jlimit (kFilterSlopeMin, kFilterSlopeMax,
+									  loadIntParamOrDefault (filterLpSlopeParam, kFilterSlopeDefault));
+
+	const float hpFreq = juce::jlimit (kFilterFreqMin, juce::jmin (kFilterFreqMax, 0.49f * sr), smoothedFilterHpFreq_);
+	const float lpFreq = juce::jlimit (kFilterFreqMin, juce::jmin (kFilterFreqMax, 0.49f * sr), smoothedFilterLpFreq_);
+
+	if (forceHp || hpSlope != lastCalcHpSlope_ || std::abs (hpFreq - lastCalcHpFreq_) > 0.01f)
+	{
+		lastCalcHpFreq_  = hpFreq;
+		lastCalcHpSlope_ = hpSlope;
+
+		if (hpSlope == 0)      // 6 dB/oct — single 1-pole
+		{
+			hpCoeffs_[0] = calcOnePoleHP (hpFreq, sr);
+			hpCoeffs_[1] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };  // pass-through
+		}
+		else if (hpSlope == 1) // 12 dB/oct — single Butterworth biquad
+		{
+			constexpr float kBW2_Q = 0.70710678f;  // 1/sqrt(2)
+			hpCoeffs_[0] = calcBiquadHP (hpFreq, sr, kBW2_Q);
+			hpCoeffs_[1] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		}
+		else                   // 24 dB/oct — two cascaded Butterworth biquads
+		{
+			hpCoeffs_[0] = calcBiquadHP (hpFreq, sr, kBW4_Q1);
+			hpCoeffs_[1] = calcBiquadHP (hpFreq, sr, kBW4_Q2);
+		}
+	}
+
+	if (forceLp || lpSlope != lastCalcLpSlope_ || std::abs (lpFreq - lastCalcLpFreq_) > 0.01f)
+	{
+		lastCalcLpFreq_  = lpFreq;
+		lastCalcLpSlope_ = lpSlope;
+
+		if (lpSlope == 0)
+		{
+			lpCoeffs_[0] = calcOnePoleLP (lpFreq, sr);
+			lpCoeffs_[1] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		}
+		else if (lpSlope == 1)
+		{
+			constexpr float kBW2_Q = 0.70710678f;
+			lpCoeffs_[0] = calcBiquadLP (lpFreq, sr, kBW2_Q);
+			lpCoeffs_[1] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		}
+		else
+		{
+			lpCoeffs_[0] = calcBiquadLP (lpFreq, sr, kBW4_Q1);
+			lpCoeffs_[1] = calcBiquadLP (lpFreq, sr, kBW4_Q2);
+		}
+	}
 }
 
 void FREQTRAudioProcessor::releaseResources()
@@ -396,6 +533,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float outputDb = loadAtomicOrDefault (outputParam, kOutputDefault);
 	const float inputGain  = juce::Decibels::decibelsToGain (inputDb, -100.0f);
 	const float outputGain = juce::Decibels::decibelsToGain (outputDb, -100.0f);
+	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
+	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
 	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
@@ -499,6 +638,23 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	float* writeL = (numChannels > 0) ? buffer.getWritePointer (0) : nullptr;
 	float* writeR = (numChannels > 1) ? buffer.getWritePointer (1) : nullptr;
+
+	// ── Wet filter targets ──
+	float targetHpFreq = 0.0f, targetLpFreq = 0.0f;
+	int numSections_hp = 0, numSections_lp = 0;
+	if (hpOn || lpOn)
+	{
+		targetHpFreq = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+			loadAtomicOrDefault (filterHpFreqParam, kFilterHpFreqDefault));
+		targetLpFreq = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+			loadAtomicOrDefault (filterLpFreqParam, kFilterLpFreqDefault));
+		const int hpSlope = juce::jlimit (kFilterSlopeMin, kFilterSlopeMax,
+			loadIntParamOrDefault (filterHpSlopeParam, kFilterSlopeDefault));
+		const int lpSlope = juce::jlimit (kFilterSlopeMin, kFilterSlopeMax,
+			loadIntParamOrDefault (filterLpSlopeParam, kFilterSlopeDefault));
+		numSections_hp = (hpSlope == 2) ? 2 : 1;
+		numSections_lp = (lpSlope == 2) ? 2 : 1;
+	}
 
 	for (int n = 0; n < numSamples; ++n)
 	{
@@ -614,6 +770,39 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			dcBlockTick (biquadTick (wetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
 		feedbackLastR = juce::jlimit (-4.0f, 4.0f,
 			dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
+
+		// ── Wet filter (HP + LP) ──
+		if (hpOn || lpOn)
+		{
+			smoothedFilterHpFreq_ = smoothedFilterHpFreq_ * kGainSmoothCoeff
+				+ targetHpFreq * (1.0f - kGainSmoothCoeff);
+			smoothedFilterLpFreq_ = smoothedFilterLpFreq_ * kGainSmoothCoeff
+				+ targetLpFreq * (1.0f - kGainSmoothCoeff);
+
+			--filterCoeffCountdown_;
+			if (filterCoeffCountdown_ <= 0)
+			{
+				filterCoeffCountdown_ = kFilterCoeffUpdateInterval;
+				updateFilterCoeffs (false, false);
+			}
+
+			if (hpOn)
+			{
+				for (int s = 0; s < numSections_hp; ++s)
+				{
+					wetL = processWetBiquad (hpCoeffs_[s], wetFilterState_[0].hp[s], wetL);
+					wetR = processWetBiquad (hpCoeffs_[s], wetFilterState_[1].hp[s], wetR);
+				}
+			}
+			if (lpOn)
+			{
+				for (int s = 0; s < numSections_lp; ++s)
+				{
+					wetL = processWetBiquad (lpCoeffs_[s], wetFilterState_[0].lp[s], wetL);
+					wetR = processWetBiquad (lpCoeffs_[s], wetFilterState_[1].lp[s], wetR);
+				}
+			}
+		}
 
 		// ── Mix (dry = delayed or direct depending on ALIGN) ──
 		const float dryL = alignEnabled ? realL : inL;
@@ -740,6 +929,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamAlign, "Align", true));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamPdc, "PDC", true));
+
+	// Wet filter
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamFilterHpFreq, "Filter HP Freq",
+		juce::NormalisableRange<float> (kFilterFreqMin, kFilterFreqMax, 0.0f, 0.35f), kFilterHpFreqDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamFilterLpFreq, "Filter LP Freq",
+		juce::NormalisableRange<float> (kFilterFreqMin, kFilterFreqMax, 0.0f, 0.35f), kFilterLpFreqDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamFilterHpSlope, "Filter HP Slope",
+		juce::NormalisableRange<float> ((float) kFilterSlopeMin, (float) kFilterSlopeMax, 1.0f), (float) kFilterSlopeDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamFilterLpSlope, "Filter LP Slope",
+		juce::NormalisableRange<float> ((float) kFilterSlopeMin, (float) kFilterSlopeMax, 1.0f), (float) kFilterSlopeDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamFilterHpOn, "Filter HP On", false));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamFilterLpOn, "Filter LP On", false));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

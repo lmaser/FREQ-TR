@@ -24,6 +24,7 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 - **Bar sliders**: Click and drag horizontally. Right-click for numeric entry (except STYLE, which is slider-only).
 - **Toggle buttons**: SYNC, MIDI, ALIGN, PDC. Click to enable/disable.
 - **Collapsible INPUT/OUTPUT/MIX section**: Click the toggle bar (triangle) at the top of the slider area to swap between main parameters and the INPUT, OUTPUT, MIX controls. The toggle bar stays fixed in place; only the arrow direction changes. State persists across sessions and preset changes.
+- **Filter bar**: Visible in the INPUT/OUTPUT/MIX section. Click to open the HP/LP filter configuration prompt with frequency, slope, and enable/disable controls for each filter.
 - **Gear icon** (top-right): Opens the info popup with version, credits, and a link to Graphics settings.
 - **Graphics popup**: Toggle CRT post-processing effect and switch between default/custom colour palettes.
 - **Resize**: Drag the bottom-right corner. Size persists across sessions.
@@ -53,6 +54,21 @@ Post-processing gain. Applied to the wet signal only.
 ### MIX (0–100%)
 
 Dry/wet balance. 0% = fully dry, 100% = fully wet.
+
+### HP/LP FILTER
+
+High-pass and low-pass filters applied to the wet signal, accessible via the filter bar in the IO section.
+
+- **HP FREQ (20–20 000 Hz)**: High-pass cutoff frequency.
+- **LP FREQ (20–20 000 Hz)**: Low-pass cutoff frequency.
+- **HP SLOPE (6 dB / 12 dB / 24 dB)**: High-pass filter slope.
+- **LP SLOPE (6 dB / 12 dB / 24 dB)**: Low-pass filter slope.
+- **HP / LP toggles**: Enable or disable each filter independently. Click the HP/LP label or its checkbox to toggle.
+
+Slope modes:
+- **6 dB/oct**: Single-pole filter.
+- **12 dB/oct**: Second-order Butterworth.
+- **24 dB/oct**: Two cascaded second-order Butterworth stages.
 
 ### FREQ (0–5,000 Hz)
 
@@ -154,6 +170,7 @@ Plugin Delay Compensation. When ON, reports 64 samples of latency to the DAW, al
 - **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix (when ALIGN is ON).
 - **Oscillator**: Band-limited morphing waveform (sine → triangle → square → sawtooth) with per-sample phase accumulation.
 - **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, and mix parameters.
+- **Wet filter**: Biquad HP/LP on the wet signal. Transposed Direct Form II. Coefficients updated once per block (channel 0), shared across channels.
 
 ### MIDI Implementation
 - Standard A440 tuning: `frequency = 440 × 2^((note − 69) / 12)`.

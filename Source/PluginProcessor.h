@@ -29,6 +29,13 @@ public:
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
 
+	static constexpr const char* kParamFilterHpFreq  = "filter_hp_freq";
+	static constexpr const char* kParamFilterLpFreq  = "filter_lp_freq";
+	static constexpr const char* kParamFilterHpSlope = "filter_hp_slope";
+	static constexpr const char* kParamFilterLpSlope = "filter_lp_slope";
+	static constexpr const char* kParamFilterHpOn    = "filter_hp_on";
+	static constexpr const char* kParamFilterLpOn    = "filter_lp_on";
+
 	// UI state parameters (hidden from DAW automation)
 	static constexpr const char* kParamUiWidth   = "ui_width";
 	static constexpr const char* kParamUiHeight  = "ui_height";
@@ -81,6 +88,14 @@ public:
 	static constexpr float kOutputMin     = -100.0f;
 	static constexpr float kOutputMax     = 24.0f;
 	static constexpr float kOutputDefault = 0.0f;
+
+	static constexpr float kFilterFreqMin     = 20.0f;
+	static constexpr float kFilterFreqMax     = 20000.0f;
+	static constexpr float kFilterHpFreqDefault = 250.0f;
+	static constexpr float kFilterLpFreqDefault = 2000.0f;
+	static constexpr int   kFilterSlopeMin     = 0;       // 6 dB/oct
+	static constexpr int   kFilterSlopeMax     = 2;       // 24 dB/oct
+	static constexpr int   kFilterSlopeDefault = 1;       // 12 dB/oct
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -145,6 +160,10 @@ public:
 	struct BiquadState  { float s1 = 0.0f, s2 = 0.0f; };
 	struct BiquadCoeffs { float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f; };
 
+	// ── Wet filter (HP + LP) ──
+	struct WetFilterBiquadCoeffs { float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f; };
+	struct WetFilterBiquadState  { float z1 = 0.0f, z2 = 0.0f; };
+
 private:
 	struct UiStateKeys
 	{
@@ -206,6 +225,27 @@ private:
 	BiquadState  fbkLpStateL, fbkLpStateR;
 	BiquadCoeffs fbkLpCoeffs;
 
+	// ── Wet filter state (HP + LP) ──
+	struct WetFilterChannelState
+	{
+		WetFilterBiquadState hp[2];   // up to 2 cascaded sections (24 dB/oct)
+		WetFilterBiquadState lp[2];
+		void reset() { *this = {}; }
+	};
+	WetFilterChannelState wetFilterState_[2];       // L, R
+	WetFilterBiquadCoeffs hpCoeffs_[2];             // section 0, 1
+	WetFilterBiquadCoeffs lpCoeffs_[2];
+	float smoothedFilterHpFreq_ = kFilterHpFreqDefault;
+	float smoothedFilterLpFreq_ = kFilterLpFreqDefault;
+	float lastCalcHpFreq_ = -1.0f;
+	float lastCalcLpFreq_ = -1.0f;
+	int   lastCalcHpSlope_ = -1;
+	int   lastCalcLpSlope_ = -1;
+	static constexpr int kFilterCoeffUpdateInterval = 32;
+	int   filterCoeffCountdown_ = 0;
+
+	void updateFilterCoeffs (bool forceHp, bool forceLp);
+
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ
 	bool useSyncRetrigPhase = false;
@@ -232,6 +272,12 @@ private:
 	std::atomic<float>* midiParam    = nullptr;
 	std::atomic<float>* alignParam   = nullptr;
 	std::atomic<float>* pdcParam     = nullptr;
+	std::atomic<float>* filterHpFreqParam  = nullptr;
+	std::atomic<float>* filterLpFreqParam  = nullptr;
+	std::atomic<float>* filterHpSlopeParam = nullptr;
+	std::atomic<float>* filterLpSlopeParam = nullptr;
+	std::atomic<float>* filterHpOnParam    = nullptr;
+	std::atomic<float>* filterLpOnParam    = nullptr;
 
 	std::atomic<float>* uiWidthParam   = nullptr;
 	std::atomic<float>* uiHeightParam  = nullptr;

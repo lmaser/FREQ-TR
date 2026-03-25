@@ -199,6 +199,14 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	filterHpOnParam    = apvts.getRawParameterValue (kParamFilterHpOn);
 	filterLpOnParam    = apvts.getRawParameterValue (kParamFilterLpOn);
 
+	tiltParam          = apvts.getRawParameterValue (kParamTilt);
+	chaosParam         = apvts.getRawParameterValue (kParamChaos);
+	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
+	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
+	chaosSpdParam      = apvts.getRawParameterValue (kParamChaosSpd);
+	chaosAmtFilterParam = apvts.getRawParameterValue (kParamChaosAmtFilter);
+	chaosSpdFilterParam = apvts.getRawParameterValue (kParamChaosSpdFilter);
+
 	uiWidthParam   = apvts.getRawParameterValue (kParamUiWidth);
 	uiHeightParam  = apvts.getRawParameterValue (kParamUiHeight);
 	uiPaletteParam = apvts.getRawParameterValue (kParamUiPalette);
@@ -212,6 +220,13 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	uiEditorHeight.store (h, std::memory_order_relaxed);
 
 	buildShapeGainTable();
+	buildSineLut();
+}
+
+void FREQTRAudioProcessor::buildSineLut() noexcept
+{
+	for (int i = 0; i <= kSineLutSize; ++i)
+		sineLut_[i] = std::sin ((float) i / (float) kSineLutSize * juce::MathConstants<float>::twoPi);
 }
 
 void FREQTRAudioProcessor::buildShapeGainTable()
@@ -317,7 +332,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	smoothedOutputGain = 1.0f;
 
 	feedbackSmoothed.reset (currentSampleRate, kFeedbackSmoothingSeconds);
-	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (0.0f, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
+	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
 	feedbackLastL = 0.0f;
 	feedbackLastR = 0.0f;
 
@@ -356,6 +371,26 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	lastCalcLpSlope_ = -1;
 	filterCoeffCountdown_ = 0;
 	updateFilterCoeffs (true, true);
+
+	// Reset tilt state
+	tiltDb_ = 0.0f;
+	smoothedTiltDb_ = 0.0f;
+	tiltB0_ = 1.0f; tiltB1_ = 0.0f; tiltA1_ = 0.0f;
+	tiltStateL_ = 0.0f; tiltStateR_ = 0.0f;
+
+	// Reset chaos state
+	chaosFilterEnabled_ = false;
+	chaosDelayEnabled_  = false;
+	chaosAmtD_ = 0.0f; chaosAmtF_ = 0.0f;
+	chaosDPhase_ = 0.0f; chaosDTarget_ = 0.0f; chaosDSmoothed_ = 0.0f;
+	chaosGPhase_ = 0.0f; chaosGTarget_ = 0.0f; chaosGSmoothed_ = 0.0f;
+	chaosFPhase_ = 0.0f; chaosFTarget_ = 0.0f; chaosFSmoothed_ = 0.0f;
+	smoothedChaosDelayMaxSamples_ = 0.0f;
+	smoothedChaosGainMaxDb_ = 0.0f;
+	smoothedChaosFilterMaxOct_ = 0.0f;
+	chaosParamSmoothCoeff_ = 0.999f;
+	std::memset (chaosDelayBuf_, 0, sizeof (chaosDelayBuf_));
+	chaosDelayWritePos_ = 0;
 }
 
 void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
@@ -521,8 +556,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	// ── Read parameters ──
 	float targetFreq   = loadAtomicOrDefault (freqParam, kFreqDefault);
 	const float modVal = loadAtomicOrDefault (modParam, kModDefault);
-	const float rawFeedback = juce::jlimit (0.0f, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
-	// Smoothstep 3x²−2x³, capped at 0.99 (LPF handles HF accumulation)
+	const float rawFeedback = juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
 	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
@@ -656,6 +690,62 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		numSections_lp = (lpSlope == 2) ? 2 : 1;
 	}
 
+	// ── Tilt target ──
+	const float tiltTarget = loadAtomicOrDefault (tiltParam, kTiltDefault);
+
+	// ── Chaos ──
+	chaosFilterEnabled_ = loadBoolParamOrDefault (chaosParam, false);
+	chaosDelayEnabled_  = loadBoolParamOrDefault (chaosDelayParam, false);
+	const bool anyChaos = chaosFilterEnabled_ || chaosDelayEnabled_;
+	if (anyChaos)
+	{
+		if (chaosDelayEnabled_)
+		{
+			const float rawAmtD = loadAtomicOrDefault (chaosAmtParam, kChaosAmtDefault);
+			const float rawSpdD = loadAtomicOrDefault (chaosSpdParam, kChaosSpdDefault);
+			chaosAmtD_       = rawAmtD;
+			chaosShPeriodD_  = (float) currentSampleRate / rawSpdD;
+			const float amtNormD = rawAmtD * 0.01f;
+			chaosDelayMaxSamples_ = amtNormD * 0.005f * (float) currentSampleRate;  // ±5ms at 100%
+			chaosGainMaxDb_       = amtNormD * 1.0f;                                // ±1dB at 100%
+			constexpr float kChaosDTau = 0.030f;
+			chaosDSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosDTau));
+			constexpr float kChaosGTau = 0.015f;
+			chaosGSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosGTau));
+		}
+		else
+		{
+			chaosDelayMaxSamples_ = 0.0f;
+			chaosGainMaxDb_ = 0.0f;
+		}
+
+		if (chaosFilterEnabled_)
+		{
+			const float rawAmtF = loadAtomicOrDefault (chaosAmtFilterParam, kChaosAmtDefault);
+			const float rawSpdF = loadAtomicOrDefault (chaosSpdFilterParam, kChaosSpdDefault);
+			chaosAmtF_       = rawAmtF;
+			chaosShPeriodF_  = (float) currentSampleRate / rawSpdF;
+			const float amtNormF = rawAmtF * 0.01f;
+			chaosFilterMaxOct_ = amtNormF * 2.0f;  // ±2 oct at 100%
+			constexpr float kChaosFTau = 0.060f;
+			chaosFSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosFTau));
+		}
+		else
+		{
+			chaosFilterMaxOct_ = 0.0f;
+		}
+
+		constexpr float kChaosParamTau = 0.010f;
+		chaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosParamTau));
+	}
+	else
+	{
+		chaosAmtD_ = 0.0f; chaosAmtF_ = 0.0f;
+		chaosDelayMaxSamples_ = 0.0f;
+		chaosGainMaxDb_ = 0.0f;
+		chaosFilterMaxOct_ = 0.0f;
+	}
+
 	for (int n = 0; n < numSamples; ++n)
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
@@ -713,12 +803,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float realR = hilbertBufR[(size_t) delayIdx];
 
 		// ── Oscillator (L channel / shared) ──
-		const float oscCos = std::cos ((float) oscPhase * juce::MathConstants<float>::twoPi);
-		const float oscSin = std::sin ((float) oscPhase * juce::MathConstants<float>::twoPi);
+		const float oscCos = fastCos ((float) oscPhase);
+		const float oscSin = fastSin ((float) oscPhase);
 
 		// ── Oscillator R (only distinct from L in DUAL mode) ──
-		const float oscCosR = std::cos ((float) oscPhaseR * juce::MathConstants<float>::twoPi);
-		const float oscSinR = std::sin ((float) oscPhaseR * juce::MathConstants<float>::twoPi);
+		const float oscCosR = fastCos ((float) oscPhaseR);
+		const float oscSinR = fastSin ((float) oscPhaseR);
 
 		// Peak-normalization factor for current smoothed shape
 		const float curShapeIdx = smoothedShape * (float) kShapeTableSize;
@@ -771,6 +861,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		feedbackLastR = juce::jlimit (-4.0f, 4.0f,
 			dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
 
+		// ── Advance chaos S&H ──
+		if (chaosDelayEnabled_) advanceChaosD();
+		if (chaosFilterEnabled_) advanceChaosF();
+
 		// ── Wet filter (HP + LP) ──
 		if (hpOn || lpOn)
 		{
@@ -783,7 +877,24 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			if (filterCoeffCountdown_ <= 0)
 			{
 				filterCoeffCountdown_ = kFilterCoeffUpdateInterval;
-				updateFilterCoeffs (false, false);
+				if (chaosFilterEnabled_ && chaosAmtF_ > 0.01f)
+				{
+					const float oct = chaosFSmoothed_ * smoothedChaosFilterMaxOct_;
+					const float mult = std::exp2 (oct);
+					const float sHp = smoothedFilterHpFreq_;
+					const float sLp = smoothedFilterLpFreq_;
+					smoothedFilterHpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+						(hpOn ? sHp : kFilterFreqMin) * mult);
+					smoothedFilterLpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+						(lpOn ? sLp : kFilterFreqMax) * mult);
+					updateFilterCoeffs (true, true);
+					smoothedFilterHpFreq_ = sHp;
+					smoothedFilterLpFreq_ = sLp;
+				}
+				else
+				{
+					updateFilterCoeffs (false, false);
+				}
 			}
 
 			if (hpOn)
@@ -802,6 +913,38 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					wetR = processWetBiquad (lpCoeffs_[s], wetFilterState_[1].lp[s], wetR);
 				}
 			}
+		}
+
+		// ── Tilt EQ (1st-order shelf, 1 kHz pivot) ──
+		smoothedTiltDb_ = paramCoeff * smoothedTiltDb_ + (1.0f - paramCoeff) * tiltTarget;
+		--tiltCoeffCountdown_;
+		if (tiltCoeffCountdown_ <= 0)
+		{
+			tiltCoeffCountdown_ = kTiltCoeffUpdateInterval;
+			if (std::abs (smoothedTiltDb_ - tiltDb_) > 0.01f)
+			{
+				tiltDb_ = smoothedTiltDb_;
+				computeTiltCoeffs (tiltDb_, 1000.0f, (float) currentSampleRate);
+			}
+		}
+		{
+			const float tL = tiltB0_ * wetL + tiltStateL_;
+			tiltStateL_ = tiltB1_ * wetL - tiltA1_ * tL;
+			wetL = tL;
+
+			const float tR = tiltB0_ * wetR + tiltStateR_;
+			tiltStateR_ = tiltB1_ * wetR - tiltA1_ * tR;
+			wetR = tR;
+		}
+
+		// ── Chaos D (micro-delay + gain modulation) ──
+		if (chaosDelayEnabled_)
+		{
+			applyChaosDelay (wetL, wetR);
+			const float gainDb  = chaosGSmoothed_ * smoothedChaosGainMaxDb_;
+			const float gainLin = std::exp2 (gainDb * 0.16609640474f);  // log2(10)/20
+			wetL *= gainLin;
+			wetR *= gainLin;
 		}
 
 		// ── Mix (dry = delayed or direct depending on ALIGN) ──
@@ -891,7 +1034,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		juce::NormalisableRange<float> (kModMin, kModMax, 0.0f, 1.0f), kModDefault));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamFeedback, "Feedback",
-		juce::NormalisableRange<float> (0.0f, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
+		juce::NormalisableRange<float> (kFeedbackMin, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
 	// Engine: 0 = AM, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",
@@ -949,6 +1092,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamFilterHpOn, "Filter HP On", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamFilterLpOn, "Filter LP On", false));
+
+	// Tilt
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamTilt, "Tilt",
+		juce::NormalisableRange<float> (kTiltMin, kTiltMax, 0.0f, 1.0f), kTiltDefault));
+
+	// Chaos
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamChaos, "Chaos Filter", false));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamChaosD, "Chaos Delay", false));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamChaosAmt, "Chaos Amount",
+		juce::NormalisableRange<float> (kChaosAmtMin, kChaosAmtMax, 0.1f), kChaosAmtDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamChaosSpd, "Chaos Speed",
+		juce::NormalisableRange<float> (kChaosSpdMin, kChaosSpdMax, 0.01f, 0.3f), kChaosSpdDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamChaosAmtFilter, "Chaos Amt Filter",
+		juce::NormalisableRange<float> (kChaosAmtMin, kChaosAmtMax, 0.1f), kChaosAmtDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamChaosSpdFilter, "Chaos Spd Filter",
+		juce::NormalisableRange<float> (kChaosSpdMin, kChaosSpdMax, 0.01f, 0.3f), kChaosSpdDefault));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

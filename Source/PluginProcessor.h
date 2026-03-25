@@ -36,6 +36,17 @@ public:
 	static constexpr const char* kParamFilterHpOn    = "filter_hp_on";
 	static constexpr const char* kParamFilterLpOn    = "filter_lp_on";
 
+	// Tilt
+	static constexpr const char* kParamTilt          = "tilt";
+
+	// Chaos
+	static constexpr const char* kParamChaos         = "chaos";
+	static constexpr const char* kParamChaosD        = "chaos_d";
+	static constexpr const char* kParamChaosAmt      = "chaos_amt";
+	static constexpr const char* kParamChaosSpd      = "chaos_spd";
+	static constexpr const char* kParamChaosAmtFilter = "chaos_amt_filter";
+	static constexpr const char* kParamChaosSpdFilter = "chaos_spd_filter";
+
 	// UI state parameters (hidden from DAW automation)
 	static constexpr const char* kParamUiWidth   = "ui_width";
 	static constexpr const char* kParamUiHeight  = "ui_height";
@@ -96,6 +107,19 @@ public:
 	static constexpr int   kFilterSlopeMin     = 0;       // 6 dB/oct
 	static constexpr int   kFilterSlopeMax     = 2;       // 24 dB/oct
 	static constexpr int   kFilterSlopeDefault = 1;       // 12 dB/oct
+
+	// Tilt range
+	static constexpr float kTiltMin     = -6.0f;
+	static constexpr float kTiltMax     =  6.0f;
+	static constexpr float kTiltDefault =  0.0f;
+
+	// Chaos ranges
+	static constexpr float kChaosAmtMin     = 0.0f;
+	static constexpr float kChaosAmtMax     = 100.0f;
+	static constexpr float kChaosAmtDefault = 50.0f;
+	static constexpr float kChaosSpdMin     = 0.01f;
+	static constexpr float kChaosSpdMax     = 100.0f;
+	static constexpr float kChaosSpdDefault = 5.0f;
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -200,6 +224,23 @@ private:
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	double oscPhaseR = 0.0;        // R-channel phase (WIDE/DUAL: different rate)
+
+	// ── Sine look-up table (linear interpolation, 4096 entries) ──
+	static constexpr int kSineLutSize = 4096;
+	float sineLut_[kSineLutSize + 1] {};   // +1 for lerp guard
+	void buildSineLut() noexcept;
+	inline float fastSin (float phase01) const noexcept
+	{
+		const float idx = phase01 * (float) kSineLutSize;
+		const int i0 = (int) idx & (kSineLutSize - 1);
+		const float frac = idx - std::floor (idx);
+		return sineLut_[i0] + frac * (sineLut_[i0 + 1] - sineLut_[i0]);
+	}
+	inline float fastCos (float phase01) const noexcept
+	{
+		return fastSin (phase01 + 0.25f);
+	}
+
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
 	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
@@ -279,6 +320,14 @@ private:
 	std::atomic<float>* filterHpOnParam    = nullptr;
 	std::atomic<float>* filterLpOnParam    = nullptr;
 
+	std::atomic<float>* tiltParam          = nullptr;
+	std::atomic<float>* chaosParam         = nullptr;
+	std::atomic<float>* chaosDelayParam    = nullptr;
+	std::atomic<float>* chaosAmtParam      = nullptr;
+	std::atomic<float>* chaosSpdParam      = nullptr;
+	std::atomic<float>* chaosAmtFilterParam = nullptr;
+	std::atomic<float>* chaosSpdFilterParam = nullptr;
+
 	std::atomic<float>* uiWidthParam   = nullptr;
 	std::atomic<float>* uiHeightParam  = nullptr;
 	std::atomic<float>* uiPaletteParam = nullptr;
@@ -294,6 +343,162 @@ private:
 		std::atomic<juce::uint32> { juce::Colours::white.getARGB() },
 		std::atomic<juce::uint32> { juce::Colours::black.getARGB() }
 	};
+
+	// ── Tilt EQ state (1st-order shelving, 1 kHz pivot) ──
+	float tiltDb_ = 0.0f;
+	float smoothedTiltDb_ = 0.0f;
+	float tiltB0_ = 1.0f, tiltB1_ = 0.0f, tiltA1_ = 0.0f;
+	float tiltStateL_ = 0.0f, tiltStateR_ = 0.0f;
+	static constexpr int kTiltCoeffUpdateInterval = 32;
+	int tiltCoeffCountdown_ = 0;
+
+	void computeTiltCoeffs (float tiltDb, float fc, float fs) noexcept
+	{
+		if (std::abs (tiltDb) < 0.01f)
+		{
+			tiltB0_ = 1.0f; tiltB1_ = 0.0f; tiltA1_ = 0.0f;
+			return;
+		}
+		const float gain = std::exp2 (std::abs (tiltDb) * 0.16609640474f);  // log2(10)/20
+		const float K = std::tan (juce::MathConstants<float>::pi * fc / fs);
+		if (tiltDb > 0.0f)
+		{
+			const float norm   = 1.0f / (1.0f + K);
+			const float center = 1.0f / std::sqrt (gain);
+			tiltB0_ = (gain + K) * norm * center;
+			tiltB1_ = (K - gain) * norm * center;
+			tiltA1_ = (K - 1.0f) * norm;
+		}
+		else
+		{
+			const float norm   = 1.0f / (gain + K);
+			const float center = std::sqrt (gain);
+			tiltB0_ = (1.0f + K) * norm * center;
+			tiltB1_ = (K - 1.0f) * norm * center;
+			tiltA1_ = (K - gain) * norm;
+		}
+	}
+
+	// ── Chaos state ──
+	bool  chaosFilterEnabled_ = false;
+	bool  chaosDelayEnabled_  = false;
+
+	// CHS D parameters
+	float chaosAmtD_                    = 0.0f;
+	float chaosShPeriodD_               = 8820.0f;
+	float smoothedChaosShPeriodD_       = 8820.0f;
+	float chaosDelayMaxSamples_         = 0.0f;
+	float smoothedChaosDelayMaxSamples_ = 0.0f;
+	float chaosGainMaxDb_               = 0.0f;
+	float smoothedChaosGainMaxDb_       = 0.0f;
+
+	// CHS D S&H: delay
+	float chaosDPhase_       = 0.0f;
+	float chaosDTarget_      = 0.0f;
+	float chaosDSmoothed_    = 0.0f;
+	float chaosDSmoothCoeff_ = 0.999f;
+	juce::Random chaosDRng_;
+
+	// CHS D S&H: gain (decorrelated)
+	float chaosGPhase_       = 0.0f;
+	float chaosGTarget_      = 0.0f;
+	float chaosGSmoothed_    = 0.0f;
+	float chaosGSmoothCoeff_ = 0.999f;
+	juce::Random chaosGRng_;
+
+	// CHS F parameters
+	float chaosAmtF_                  = 0.0f;
+	float chaosShPeriodF_             = 8820.0f;
+	float smoothedChaosShPeriodF_     = 8820.0f;
+	float chaosFilterMaxOct_          = 0.0f;
+	float smoothedChaosFilterMaxOct_  = 0.0f;
+
+	// CHS F S&H: filter
+	float chaosFPhase_       = 0.0f;
+	float chaosFTarget_      = 0.0f;
+	float chaosFSmoothed_    = 0.0f;
+	float chaosFSmoothCoeff_ = 0.999f;
+	juce::Random chaosFRng_;
+
+	// Chaos per-sample param smoothing
+	float chaosParamSmoothCoeff_ = 0.999f;
+
+	// Chaos micro-delay buffer
+	static constexpr int kChaosDelayBufLen = 1024;
+	float chaosDelayBuf_[2][kChaosDelayBufLen] = {};
+	int   chaosDelayWritePos_ = 0;
+
+	inline void advanceChaosD() noexcept
+	{
+		smoothedChaosDelayMaxSamples_ += (chaosDelayMaxSamples_ - smoothedChaosDelayMaxSamples_) * (1.0f - chaosParamSmoothCoeff_);
+		smoothedChaosGainMaxDb_       += (chaosGainMaxDb_       - smoothedChaosGainMaxDb_)       * (1.0f - chaosParamSmoothCoeff_);
+		smoothedChaosShPeriodD_       += (chaosShPeriodD_       - smoothedChaosShPeriodD_)       * (1.0f - chaosParamSmoothCoeff_);
+
+		chaosDPhase_ += 1.0f;
+		if (chaosDPhase_ >= smoothedChaosShPeriodD_)
+		{
+			chaosDPhase_ -= smoothedChaosShPeriodD_;
+			chaosDTarget_ = chaosDRng_.nextFloat() * 2.0f - 1.0f;
+		}
+		chaosDSmoothed_ = chaosDSmoothCoeff_ * chaosDSmoothed_
+		                + (1.0f - chaosDSmoothCoeff_) * chaosDTarget_;
+
+		chaosGPhase_ += 1.0f;
+		if (chaosGPhase_ >= smoothedChaosShPeriodD_)
+		{
+			chaosGPhase_ -= smoothedChaosShPeriodD_;
+			chaosGTarget_ = chaosGRng_.nextFloat() * 2.0f - 1.0f;
+		}
+		chaosGSmoothed_ = chaosGSmoothCoeff_ * chaosGSmoothed_
+		                + (1.0f - chaosGSmoothCoeff_) * chaosGTarget_;
+	}
+
+	inline void advanceChaosF() noexcept
+	{
+		smoothedChaosFilterMaxOct_  += (chaosFilterMaxOct_  - smoothedChaosFilterMaxOct_)  * (1.0f - chaosParamSmoothCoeff_);
+		smoothedChaosShPeriodF_     += (chaosShPeriodF_     - smoothedChaosShPeriodF_)     * (1.0f - chaosParamSmoothCoeff_);
+
+		chaosFPhase_ += 1.0f;
+		if (chaosFPhase_ >= smoothedChaosShPeriodF_)
+		{
+			chaosFPhase_ -= smoothedChaosShPeriodF_;
+			chaosFTarget_ = chaosFRng_.nextFloat() * 2.0f - 1.0f;
+		}
+		chaosFSmoothed_ = chaosFSmoothCoeff_ * chaosFSmoothed_
+		                + (1.0f - chaosFSmoothCoeff_) * chaosFTarget_;
+	}
+
+	inline void applyChaosDelay (float& wetL, float& wetR) noexcept
+	{
+		const int wp = chaosDelayWritePos_;
+		chaosDelayBuf_[0][wp] = wetL;
+		chaosDelayBuf_[1][wp] = wetR;
+
+		const float centerDelay = smoothedChaosDelayMaxSamples_;
+		const float delaySamp   = juce::jlimit (0.0f, (float)(kChaosDelayBufLen - 2),
+		                                        centerDelay + chaosDSmoothed_ * smoothedChaosDelayMaxSamples_);
+
+		const float readPos = (float) wp - delaySamp;
+		const int iPos = (int) std::floor (readPos);
+		const float frac = readPos - (float) iPos;
+		const int mask = kChaosDelayBufLen - 1;
+
+		for (int ch = 0; ch < 2; ++ch)
+		{
+			const float p0 = chaosDelayBuf_[ch][(iPos - 1) & mask];
+			const float p1 = chaosDelayBuf_[ch][(iPos    ) & mask];
+			const float p2 = chaosDelayBuf_[ch][(iPos + 1) & mask];
+			const float p3 = chaosDelayBuf_[ch][(iPos + 2) & mask];
+			const float c0 = p1;
+			const float c1 = p2 - (1.0f / 3.0f) * p0 - 0.5f * p1 - (1.0f / 6.0f) * p3;
+			const float c2 = 0.5f * (p0 + p2) - p1;
+			const float c3 = (1.0f / 6.0f) * (p3 - p0) + 0.5f * (p1 - p2);
+			float& wet = (ch == 0) ? wetL : wetR;
+			wet = ((c3 * frac + c2) * frac + c1) * frac + c0;
+		}
+
+		chaosDelayWritePos_ = (wp + 1) & mask;
+	}
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FREQTRAudioProcessor)
 };

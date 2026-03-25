@@ -32,6 +32,9 @@ private:
     void openRetrigPrompt();
     void scheduleRetrigTipAutoHide();
     void openFilterPrompt();
+    void openChaosConfigPrompt (const char* amtParamId, const char* spdParamId, const juce::String& title);
+    void openChaosFilterPrompt();
+    void openChaosDelayPrompt();
     void openInfoPopup();
     void openGraphicsPopup();
     void setPromptOverlayActive (bool shouldBeActive);
@@ -59,7 +62,8 @@ private:
 
         juce::String getTextFromValue (double v) override
         {
-            if (owner != nullptr && (this == &owner->inputSlider || this == &owner->outputSlider))
+            if (owner != nullptr && (this == &owner->inputSlider || this == &owner->outputSlider
+                || this == &owner->tiltSlider))
             {
                 juce::String t (v, 1);
                 if (t.containsChar ('.'))
@@ -119,7 +123,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 10 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE
+    // 11 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE, TILT
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
@@ -130,6 +134,7 @@ private:
     BarSlider shapeSlider;
     BarSlider polaritySlider;
     BarSlider styleSlider;
+    BarSlider tiltSlider;
 
     using FREQScheme = TR::TRScheme;
 
@@ -190,6 +195,12 @@ private:
     juce::ToggleButton alignButton;
     juce::ToggleButton pdcButton;
 
+    // Chaos buttons
+    juce::ToggleButton chaosFilterButton;
+    juce::ToggleButton chaosDelayButton;
+    juce::Label chaosFilterDisplay;
+    juce::Label chaosDelayDisplay;
+
     juce::Label midiChannelDisplay;
     juce::Label retrigDisplay;
 
@@ -207,11 +218,14 @@ private:
     std::unique_ptr<SliderAttachment> mixAttachment;
     std::unique_ptr<SliderAttachment> inputAttachment;
     std::unique_ptr<SliderAttachment> outputAttachment;
+    std::unique_ptr<SliderAttachment> tiltAttachment;
 
     std::unique_ptr<ButtonAttachment> syncAttachment;
     std::unique_ptr<ButtonAttachment> midiAttachment;
     std::unique_ptr<ButtonAttachment> alignAttachment;
     std::unique_ptr<ButtonAttachment> pdcAttachment;
+    std::unique_ptr<ButtonAttachment> chaosFilterAttachment;
+    std::unique_ptr<ButtonAttachment> chaosDelayAttachment;
 
     juce::ComponentBoundsConstrainer resizeConstrainer;
     std::unique_ptr<juce::ResizableCornerComponent> resizerCorner;
@@ -352,6 +366,9 @@ private:
     juce::String getOutputText() const;
     juce::String getOutputTextShort() const;
 
+    juce::String getTiltText() const;
+    juce::String getTiltTextShort() const;
+
     int getTargetValueColumnWidth() const;
 
     void sliderValueChanged (juce::Slider* slider) override;
@@ -404,6 +421,10 @@ private:
     juce::String cachedOutputTextShort;
     juce::String cachedOutputIntOnly;
 
+    juce::String cachedTiltTextFull;
+    juce::String cachedTiltTextShort;
+    juce::String cachedTiltIntOnly;
+
     juce::String cachedMixIntOnly;
     juce::String cachedFreqIntOnly;
     juce::String cachedModIntOnly;
@@ -423,7 +444,7 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 10> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 11> cachedValueAreas_;
     juce::Rectangle<int> cachedFilterValueArea_;
 
     // IO collapsible section state

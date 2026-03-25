@@ -6,12 +6,12 @@
 
 namespace InfoContent
 {
-    static constexpr const char* version = "1.3";
+    static constexpr const char* version = "1.4";
 
     static constexpr const char* xml = R"xml(<?xml version="1.0" encoding="UTF-8"?>
 <info>
   <content>
-    <heading>FREQ-TR v1.3</heading>
+    <heading>FREQ-TR v1.4</heading>
     <spacer/>
     <text>by Nemester</text>
     <link url="https://github.com/lmaser/FREQ-TR">Github Repository</link>

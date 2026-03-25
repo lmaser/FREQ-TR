@@ -2026,15 +2026,15 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 0;
-            maxLen = 3;
+            maxDecs = 1;
+            maxLen = 5;
         }
         else if (&s == &engineSlider)
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 0;
-            maxLen = 3;
+            maxDecs = 1;
+            maxLen = 5;
         }
         else if (&s == &styleSlider)
         {
@@ -2061,8 +2061,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 0;
-            maxLen = 3;
+            maxDecs = 1;
+            maxLen = 5;
         }
         else if (&s == &inputSlider)
         {

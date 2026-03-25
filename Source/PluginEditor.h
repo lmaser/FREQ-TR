@@ -77,13 +77,7 @@ private:
             if (owner != nullptr && (this == &owner->mixSlider))
             {
                 double percent = v * 100.0;
-                juce::String t (percent, 4);
-                if (t.containsChar ('.'))
-                {
-                    while (t.endsWithChar ('0')) t = t.dropLastCharacters (1);
-                    if (t.endsWithChar ('.')) t = t.dropLastCharacters (1);
-                }
-                return t;
+                return juce::String (percent, 1);
             }
 
             if (owner != nullptr && this == &owner->freqSlider)
@@ -95,13 +89,7 @@ private:
             if (owner != nullptr && this == &owner->engineSlider)
             {
                 double percent = v * 100.0;
-                juce::String t (percent, 4);
-                if (t.containsChar ('.'))
-                {
-                    while (t.endsWithChar ('0')) t = t.dropLastCharacters (1);
-                    if (t.endsWithChar ('.')) t = t.dropLastCharacters (1);
-                }
-                return t;
+                return juce::String (percent, 1);
             }
 
             // For polarity (-1 to 1)

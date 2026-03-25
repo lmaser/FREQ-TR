@@ -232,21 +232,23 @@ void FREQTRAudioProcessor::buildSineLut() noexcept
 void FREQTRAudioProcessor::buildShapeGainTable()
 {
 	constexpr int kPhaseSteps = 4096;
+	// Target RMS = sine RMS = 1/sqrt(2) for consistent perceived loudness
+	constexpr double kTargetRms = 0.70710678118;   // 1 / sqrt(2)
 
 	for (int i = 0; i <= kShapeTableSize; ++i)
 	{
 		const float shape = (float) i / (float) kShapeTableSize;
-		float maxAbs = 0.0f;
+		double sumSq = 0.0;
 
 		for (int j = 0; j < kPhaseSteps; ++j)
 		{
 			const float phase = (float) j / (float) kPhaseSteps;
-			const float val = std::abs (morphedWave (phase, shape));
-			if (val > maxAbs)
-				maxAbs = val;
+			const double val = (double) morphedWave (phase, shape);
+			sumSq += val * val;
 		}
 
-		shapeGainTable[(size_t) i] = (maxAbs > 0.001f) ? (1.0f / maxAbs) : 1.0f;
+		const double rms = std::sqrt (sumSq / (double) kPhaseSteps);
+		shapeGainTable[(size_t) i] = (rms > 0.001) ? (float) (kTargetRms / rms) : 1.0f;
 	}
 }
 

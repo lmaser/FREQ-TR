@@ -252,6 +252,24 @@ void FREQTRAudioProcessor::buildShapeGainTable()
 	}
 }
 
+float FREQTRAudioProcessor::fastMorphedWave (float phase, float shape) const noexcept
+{
+	const float scaled = shape * 3.0f;
+	const int segment = juce::jlimit (0, 2, (int) scaled);
+	const float frac = scaled - (float) segment;
+
+	float a, b;
+	switch (segment)
+	{
+		case 0:  a = fastSin (phase);      b = waveTriangle (phase); break;
+		case 1:  a = waveTriangle (phase);  b = waveSquare (phase);   break;
+		case 2:  a = waveSquare (phase);    b = waveSaw (phase);      break;
+		default: a = fastSin (phase);      b = fastSin (phase);      break;
+	}
+
+	return a + frac * (b - a);
+}
+
 FREQTRAudioProcessor::~FREQTRAudioProcessor()
 {
 }
@@ -804,15 +822,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float realL = hilbertBufL[(size_t) delayIdx];
 		const float realR = hilbertBufR[(size_t) delayIdx];
 
-		// ── Oscillator (L channel / shared) ──
-		const float oscCos = fastCos ((float) oscPhase);
-		const float oscSin = fastSin ((float) oscPhase);
-
-		// ── Oscillator R (only distinct from L in DUAL mode) ──
-		const float oscCosR = fastCos ((float) oscPhaseR);
-		const float oscSinR = fastSin ((float) oscPhaseR);
-
-		// Peak-normalization factor for current smoothed shape
+		// RMS-normalization factor for current smoothed shape
 		const float curShapeIdx = smoothedShape * (float) kShapeTableSize;
 		const int csi0 = juce::jlimit (0, kShapeTableSize - 1, (int) curShapeIdx);
 		const int csi1 = juce::jmin (csi0 + 1, kShapeTableSize);
@@ -820,9 +830,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float curShapeGain = shapeGainTable[(size_t) csi0]
 							  + csiFrac * (shapeGainTable[(size_t) csi1] - shapeGainTable[(size_t) csi0]);
 
-		// Morphed waveforms (peak-normalized)
-		const float oscWave  = morphedWave ((float) oscPhase,  smoothedShape) * curShapeGain;
-		const float oscWaveR = morphedWave ((float) oscPhaseR, smoothedShape) * curShapeGain;
+		// ── Oscillator: morphed waveforms (RMS-normalized, LUT-accelerated) ──
+		// "sin" role: morphedWave(phase)
+		// "cos" role: morphedWave(phase + 0.25)  (90° quadrature offset)
+		// At shape=0 these equal pure sin/cos; at shape>0 each harmonic
+		// of the waveform creates its own frequency shift.
+		const float oscWave     = fastMorphedWave ((float) oscPhase,          smoothedShape) * curShapeGain;
+		const float oscWaveCos  = fastMorphedWave ((float) oscPhase  + 0.25f, smoothedShape) * curShapeGain;
+		const float oscWaveR    = fastMorphedWave ((float) oscPhaseR,         smoothedShape) * curShapeGain;
+		const float oscWaveCosR = fastMorphedWave ((float) oscPhaseR + 0.25f, smoothedShape) * curShapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
 		//  0=MONO, 1=STEREO (same shift both), 2=WIDE (opposite sideband + cross-fbk), 3=DUAL (×0.5 + independent)
@@ -845,13 +861,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				: amL;                                             // MONO
 
 			// Freq Shift: Re[ analytic × e^(j2πft) ] = real·cos − hilbert·sin
+			// Shape > 0 adds harmonic frequency shifts via non-sinusoidal oscillator.
 			// WIDE: R uses opposite sideband (real·cos + hilbert·sin) → lower sideband
-			const float fsL = realL * oscCos - hilbL * oscSin;
+			const float fsL = realL * oscWaveCos - hilbL * oscWave;
 			const float fsR = useStereoInput
-				? (style == 2 ? (realR * oscCos + hilbR * oscSin)       // WIDE: lower sideband
-				  : (style == 3 ? (realR * oscCosR - hilbR * oscSinR)   // DUAL: independent shift
-				                : (realR * oscCos - hilbR * oscSin)))    // STEREO: same shift
-				: fsL;                                                   // MONO
+				? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)         // WIDE: lower sideband
+				  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)   // DUAL: independent shift
+				                : (realR * oscWaveCos - hilbR * oscWave)))   // STEREO: same shift
+				: fsL;                                                       // MONO
 
 			wetL = amL + smoothedEngine * (fsL - amL);
 			wetR = amR + smoothedEngine * (fsR - amR);
@@ -971,6 +988,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		hilbertPos = (hilbertPos + 1) & (order - 1);
+	}
+
+	// ── Safety limiter: +48 dBFS — only catches runaways ──
+	constexpr float kSafetyLimit = 251.19f;
+	for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+	{
+		auto* data = buffer.getWritePointer (ch);
+		juce::FloatVectorOperations::clip (data, data, -kSafetyLimit, kSafetyLimit, numSamples);
 	}
 }
 

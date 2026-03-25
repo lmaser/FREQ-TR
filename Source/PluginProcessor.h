@@ -241,6 +241,8 @@ private:
 		return fastSin (phase01 + 0.25f);
 	}
 
+	float fastMorphedWave (float phase, float shape) const noexcept;
+
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
 	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph

@@ -1226,7 +1226,7 @@ juce::String FREQTRAudioProcessorEditor::getMixText() const
 juce::String FREQTRAudioProcessorEditor::getMixTextShort() const
 {
     const int pct = (int) std::lround (mixSlider.getValue() * 100.0);
-    return juce::String (pct) + "%";
+    return juce::String (pct) + "% MX";
 }
 
 juce::String FREQTRAudioProcessorEditor::getInputText() const
@@ -1281,8 +1281,8 @@ juce::String FREQTRAudioProcessorEditor::getTiltTextShort() const
 {
     const float db = (float) tiltSlider.getValue();
     if (std::abs (db) < 0.05f)
-        return "0 dB";
-    return juce::String (db, 1) + " dB";
+        return "0 dB TLT";
+    return juce::String (db, 1) + " dB TLT";
 }
 
 bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
@@ -1334,7 +1334,7 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         if (inDb <= kSilenceDb)
             cachedInputIntOnly = "-INF";
         else
-            cachedInputIntOnly = juce::String (inDb, 1) + "dB";
+            cachedInputIntOnly = juce::String ((int) inputSlider.getValue()) + "dB";
     }
 
     cachedOutputTextFull = getOutputText();
@@ -1344,7 +1344,7 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         if (outDb <= kSilenceDb)
             cachedOutputIntOnly = "-INF";
         else
-            cachedOutputIntOnly = juce::String (outDb, 1) + "dB";
+            cachedOutputIntOnly = juce::String ((int) outputSlider.getValue()) + "dB";
     }
 
     cachedTiltTextFull = getTiltText();
@@ -1354,7 +1354,7 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         if (std::abs (tDb) < 0.05f)
             cachedTiltIntOnly = "0dB";
         else
-            cachedTiltIntOnly = juce::String (tDb, 1) + "dB";
+            cachedTiltIntOnly = juce::String ((int) tDb) + "dB";
     }
 
     cachedMixIntOnly      = juce::String ((int) std::lround (mixSlider.getValue() * 100.0)) + "%";

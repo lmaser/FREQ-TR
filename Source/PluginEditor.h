@@ -74,10 +74,18 @@ private:
                 return t;
             }
 
-            if (owner != nullptr && (this == &owner->mixSlider))
+            if (owner != nullptr && this == &owner->mixSlider)
             {
                 double percent = v * 100.0;
                 return juce::String (percent, 1);
+            }
+
+            if (owner != nullptr && this == &owner->panSlider)
+            {
+                double percent = v * 100.0;
+                if (std::abs (percent - 50.0) < 1.0) return "C";
+                if (percent < 50.0) return "L" + juce::String (50.0 - percent, 0);
+                return "R" + juce::String (percent - 50.0, 0);
             }
 
             if (owner != nullptr && this == &owner->freqSlider)
@@ -111,7 +119,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 11 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE, TILT
+    // 12 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE, TILT, PAN
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
@@ -123,6 +131,7 @@ private:
     BarSlider polaritySlider;
     BarSlider styleSlider;
     BarSlider tiltSlider;
+    BarSlider panSlider;
 
     using FREQScheme = TR::TRScheme;
 
@@ -207,6 +216,7 @@ private:
     std::unique_ptr<SliderAttachment> inputAttachment;
     std::unique_ptr<SliderAttachment> outputAttachment;
     std::unique_ptr<SliderAttachment> tiltAttachment;
+    std::unique_ptr<SliderAttachment> panAttachment;
 
     std::unique_ptr<ButtonAttachment> syncAttachment;
     std::unique_ptr<ButtonAttachment> midiAttachment;
@@ -361,6 +371,9 @@ private:
     juce::String getTiltText() const;
     juce::String getTiltTextShort() const;
 
+    juce::String getPanText() const;
+    juce::String getPanTextShort() const;
+
     int getTargetValueColumnWidth() const;
 
     void sliderValueChanged (juce::Slider* slider) override;
@@ -429,6 +442,9 @@ private:
     juce::String cachedFilterTextFull;
     juce::String cachedFilterTextShort;
 
+    juce::String cachedPanTextFull;
+    juce::String cachedPanTextShort;
+
     juce::String cachedMidiDisplay;
 
     mutable std::uint64_t cachedValueColumnWidthKey = 0;
@@ -438,6 +454,7 @@ private:
     VerticalLayoutMetrics cachedVLayout_;
     std::array<juce::Rectangle<int>, 11> cachedValueAreas_;
     juce::Rectangle<int> cachedFilterValueArea_;
+    juce::Rectangle<int> cachedPanValueArea_;
 
     // IO collapsible section state
     juce::Rectangle<int> cachedToggleBarArea_;

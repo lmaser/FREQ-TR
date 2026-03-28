@@ -549,7 +549,7 @@ void FREQTRAudioProcessorEditor::FilterBarComponent::mouseDoubleClick (const juc
 FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    const std::array<BarSlider*, 11> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider };
+    const std::array<BarSlider*, 12> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider };
 
     useCustomPalette = audioProcessor.getUiUseCustomPalette();
     crtEnabled = audioProcessor.getUiCrtEnabled();
@@ -615,6 +615,8 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     mixSlider.setVisible (false);
     tiltSlider.setVisible (false);
     tiltSlider.setNumDecimalPlacesToDisplay (1);
+    panSlider.setVisible (false);
+    panSlider.setNumDecimalPlacesToDisplay (1);
 
     // Filter bar — hidden along with IO sliders in collapsed state
     filterBar_.setOwner (this);
@@ -710,6 +712,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindSlider (inputAttachment,    FREQTRAudioProcessor::kParamInput,   inputSlider,   (double) FREQTRAudioProcessor::kInputDefault);
     bindSlider (outputAttachment,   FREQTRAudioProcessor::kParamOutput,  outputSlider,  (double) FREQTRAudioProcessor::kOutputDefault);
     bindSlider (tiltAttachment,     FREQTRAudioProcessor::kParamTilt,    tiltSlider,    (double) FREQTRAudioProcessor::kTiltDefault);
+    bindSlider (panAttachment,      FREQTRAudioProcessor::kParamPan,     panSlider,     (double) FREQTRAudioProcessor::kPanDefault);
 
     // Disable numeric popup for STYLE (slider-only)
     styleSlider.setAllowNumericPopup (false);
@@ -777,7 +780,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     dismissEditorOwnedModalPrompts (lnf);
     setPromptOverlayActive (false);
 
-    const std::array<BarSlider*, 11> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider };
+    const std::array<BarSlider*, 12> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider };
     for (auto* slider : barSliders)
         slider->removeListener (this);
 
@@ -1285,6 +1288,24 @@ juce::String FREQTRAudioProcessorEditor::getTiltTextShort() const
     return juce::String (db, 1) + " dB TLT";
 }
 
+juce::String FREQTRAudioProcessorEditor::getPanText() const
+{
+    const float v = (float) panSlider.getValue();
+    const int pct = juce::roundToInt ((v - 0.5f) * 200.0f);
+    if (pct == 0) return "C PAN";
+    if (pct < 0)  return "L" + juce::String (-pct) + " PAN";
+    return "R" + juce::String (pct) + " PAN";
+}
+
+juce::String FREQTRAudioProcessorEditor::getPanTextShort() const
+{
+    const float v = (float) panSlider.getValue();
+    const int pct = juce::roundToInt ((v - 0.5f) * 200.0f);
+    if (pct == 0) return "C";
+    if (pct < 0)  return "L" + juce::String (-pct);
+    return "R" + juce::String (pct);
+}
+
 bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
 {
     const auto oldFreqFull     = cachedFreqTextFull;
@@ -1309,6 +1330,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     const auto oldOutputShort  = cachedOutputTextShort;
     const auto oldTiltFull     = cachedTiltTextFull;
     const auto oldTiltShort    = cachedTiltTextShort;
+    const auto oldPanFull      = cachedPanTextFull;
+    const auto oldPanShort     = cachedPanTextShort;
 
     cachedFreqTextFull      = getFreqText();
     cachedFreqTextShort     = getFreqTextShort();
@@ -1374,6 +1397,9 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     cachedFilterTextFull  = "FILTER";
     cachedFilterTextShort = "FLTR";
 
+    cachedPanTextFull  = getPanText();
+    cachedPanTextShort = getPanTextShort();
+
     return oldFreqFull      != cachedFreqTextFull
         || oldFreqShort     != cachedFreqTextShort
         || oldModFull       != cachedModTextFull
@@ -1395,7 +1421,9 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         || oldOutputFull    != cachedOutputTextFull
         || oldOutputShort   != cachedOutputTextShort
         || oldTiltFull      != cachedTiltTextFull
-        || oldTiltShort     != cachedTiltTextShort;
+        || oldTiltShort     != cachedTiltTextShort
+        || oldPanFull       != cachedPanTextFull
+        || oldPanShort      != cachedPanTextShort;
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getRowRepaintBounds (const juce::Slider& s) const
@@ -1834,11 +1862,12 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &shapeSlider)     { suffix = " SHAPE";      suffixShort = " SHP"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
     else if (&s == &mixSlider)       { suffix = " % MIX";      suffixShort = " % MIX"; }
+    else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " %"; }
     else if (&s == &inputSlider)     { suffix = " DB INPUT";   suffixShort = " DB IN"; }
     else if (&s == &outputSlider)    { suffix = " DB OUTPUT";  suffixShort = " DB OUT"; }
     const juce::String suffixText = suffix.trimStart();
     const juce::String suffixTextShort = suffixShort.trimStart();
-    const bool isPercentPrompt = (&s == &engineSlider || &s == &mixSlider || &s == &feedbackSlider);
+    const bool isPercentPrompt = (&s == &engineSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &panSlider);
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
@@ -1852,6 +1881,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
     else if (&s == &mixSlider)
         currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
+    else if (&s == &panSlider)
+        currentDisplay = juce::String (juce::jlimit (0.0, 100.0, s.getValue() * 100.0), 0);
     else
         currentDisplay = s.getTextFromValue (s.getValue());
 
@@ -1918,6 +1949,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         else if (&s == &polaritySlider)
             worstCaseText = "-1.00";
         else if (&s == &mixSlider)
+            worstCaseText = "100";
+        else if (&s == &panSlider)
             worstCaseText = "100";
         else if (&s == &inputSlider)
             worstCaseText = "-100.0";
@@ -2078,6 +2111,13 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             maxDecs = 1;
             maxLen = 6;
         }
+        else if (&s == &panSlider)
+        {
+            minVal = 0.0;
+            maxVal = 100.0;
+            maxDecs = 0;
+            maxLen = 3;
+        }
 
         if (&s == &freqSlider && isFreqSyncMode)
             te->setInputFilter (new SyncDivisionInputFilter (maxLen), true);
@@ -2222,7 +2262,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                 // Percent → 0..1 for engine, mix and feedback
                 if (safeThis != nullptr && (sliderPtr == &safeThis->engineSlider
                                          || sliderPtr == &safeThis->mixSlider
-                                         || sliderPtr == &safeThis->feedbackSlider))
+                                         || sliderPtr == &safeThis->feedbackSlider
+                                         || sliderPtr == &safeThis->panSlider))
                     v *= 0.01;
 
                 // Multiplier → slider for MOD
@@ -4066,10 +4107,10 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
     m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
     m.availableForSliders = juce::jmax (40, m.btnRow1Y - m.betweenSlidersAndButtons - m.topMargin);
 
-    // Bars below toggle: 6 IO bars when expanded (IN, OUT, TILT, FILTER, MIX, CHAOS), 7 main bars when collapsed.
+    // Bars below toggle: 7 IO bars when expanded (IN, OUT, TILT, FILTER, PAN, MIX, CHAOS), 7 main bars when collapsed.
     // Toggle bar stays fixed — only bar/gap sizing adapts to the visible count.
-    const int numSliders = ioExpanded ? 6 : 7;
-    const int numGaps    = ioExpanded ? 6 : 7;  // (N-1) inter-slider + 1 toggle-to-first
+    const int numSliders = ioExpanded ? 7 : 7;
+    const int numGaps    = ioExpanded ? 7 : 7;  // (N-1) inter-slider + 1 toggle-to-first
 
     m.toggleBarH = 20;  // fixed visual height for click area
     const int spaceForScale = juce::jmax (40, m.availableForSliders - m.toggleBarH);
@@ -4134,6 +4175,21 @@ void FREQTRAudioProcessorEditor::updateCachedLayout()
     else
     {
         cachedFilterValueArea_ = {};
+    }
+
+    // Pan slider value area
+    if (panSlider.isVisible())
+    {
+        const auto& pb = panSlider.getBounds();
+        const int valueX = pb.getRight() + cachedHLayout_.valuePad;
+        const int maxW = juce::jmax (0, getWidth() - valueX - kValueAreaRightMarginPx);
+        const int vw   = juce::jmin (cachedHLayout_.valueW, maxW);
+        const int y    = pb.getCentreY() - (kValueAreaHeightPx / 2);
+        cachedPanValueArea_ = { valueX, y, juce::jmax (0, vw), kValueAreaHeightPx };
+    }
+    else
+    {
+        cachedPanValueArea_ = {};
     }
 
     // Cache toggle bar area
@@ -4438,6 +4494,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
         // Filter bar legend
         if (! cachedFilterValueArea_.isEmpty())
             drawLegendForMode (cachedFilterValueArea_, cachedFilterTextFull, cachedFilterTextShort, cachedFilterTextShort);
+
+        // Pan slider legend
+        if (! cachedPanValueArea_.isEmpty())
+            drawLegendForMode (cachedPanValueArea_, cachedPanTextFull, cachedPanTextShort, cachedPanTextShort);
     }
 
     // ── Toggle bar (IN/OUT/MIX collapsible) ──
@@ -4574,21 +4634,23 @@ void FREQTRAudioProcessorEditor::resized()
 
     if (ioSectionExpanded_)
     {
-        // Expanded: [toggle bar] → INPUT, OUTPUT, TILT, FILTER, MIX; chaos buttons; main params hidden
+        // Expanded: [toggle bar] → INPUT, OUTPUT, TILT, FILTER, PAN, MIX; chaos buttons; main params hidden
         inputSlider.setVisible (true);
         outputSlider.setVisible (true);
         tiltSlider.setVisible (true);
         filterBar_.setVisible (true);
+        panSlider.setVisible (true);
         mixSlider.setVisible (true);
 
         inputSlider.setBounds   (horizontalLayout.leftX, mainTop + 0 * step, horizontalLayout.barW, verticalLayout.barH);
         outputSlider.setBounds  (horizontalLayout.leftX, mainTop + 1 * step, horizontalLayout.barW, verticalLayout.barH);
         tiltSlider.setBounds    (horizontalLayout.leftX, mainTop + 2 * step, horizontalLayout.barW, verticalLayout.barH);
         filterBar_.setBounds    (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
-        mixSlider.setBounds     (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
+        panSlider.setBounds     (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
+        mixSlider.setBounds     (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
 
-        // Chaos buttons at row 5
-        const int chaosY = mainTop + 5 * step;
+        // Chaos buttons at row 6
+        const int chaosY = mainTop + 6 * step;
         const int chaosRightX = horizontalLayout.leftX + horizontalLayout.barW + horizontalLayout.valuePad;
         const int chaosLeftW  = chaosRightX - horizontalLayout.leftX;
         const int chaosRightW = horizontalLayout.leftX + horizontalLayout.contentW - chaosRightX;
@@ -4619,11 +4681,12 @@ void FREQTRAudioProcessorEditor::resized()
     }
     else
     {
-        // Collapsed: [toggle bar] → main params; IO + filter + tilt + chaos hidden
+        // Collapsed: [toggle bar] → main params; IO + filter + pan + tilt + chaos hidden
         inputSlider.setVisible (false);
         outputSlider.setVisible (false);
         tiltSlider.setVisible (false);
         filterBar_.setVisible (false);
+        panSlider.setVisible (false);
         mixSlider.setVisible (false);
         chaosFilterButton.setVisible (false);
         chaosFilterDisplay.setVisible (false);
@@ -4633,6 +4696,7 @@ void FREQTRAudioProcessorEditor::resized()
         outputSlider.setBounds (0, 0, 0, 0);
         tiltSlider.setBounds (0, 0, 0, 0);
         filterBar_.setBounds (0, 0, 0, 0);
+        panSlider.setBounds (0, 0, 0, 0);
         mixSlider.setBounds (0, 0, 0, 0);
 
         freqSlider.setVisible (true);

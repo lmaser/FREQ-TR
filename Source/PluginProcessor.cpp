@@ -200,6 +200,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	filterLpOnParam    = apvts.getRawParameterValue (kParamFilterLpOn);
 
 	tiltParam          = apvts.getRawParameterValue (kParamTilt);
+	panParam           = apvts.getRawParameterValue (kParamPan);
 	chaosParam         = apvts.getRawParameterValue (kParamChaos);
 	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
 	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
@@ -990,6 +991,24 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertPos = (hilbertPos + 1) & (order - 1);
 	}
 
+	// ── Pan (equal-power sine/cosine) ──
+	{
+		const float pan = panParam->load (std::memory_order_relaxed);
+		const int numCh = buffer.getNumChannels();
+		if (numCh >= 2 && std::abs (pan - 0.5f) > 0.001f)
+		{
+			if (std::abs (pan - lastPan_) > 0.001f)
+			{
+				const float panAngle = pan * 1.5707963f;
+				lastPanLeft_  = std::cos (panAngle);
+				lastPanRight_ = std::sin (panAngle);
+				lastPan_ = pan;
+			}
+			buffer.applyGain (0, 0, numSamples, lastPanLeft_);
+			buffer.applyGain (1, 0, numSamples, lastPanRight_);
+		}
+	}
+
 	// ── Safety limiter: +48 dBFS — only catches runaways ──
 	constexpr float kSafetyLimit = 251.19f;
 	for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -1124,6 +1143,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamTilt, "Tilt",
 		juce::NormalisableRange<float> (kTiltMin, kTiltMax, 0.0f, 1.0f), kTiltDefault));
+
+	// Pan
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamPan, "Pan",
+		juce::NormalisableRange<float> (kPanMin, kPanMax, 0.0f), kPanDefault));
 
 	// Chaos
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamChaos, "Chaos Filter", false));

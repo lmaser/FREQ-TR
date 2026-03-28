@@ -39,6 +39,9 @@ public:
 	// Tilt
 	static constexpr const char* kParamTilt          = "tilt";
 
+	// Pan
+	static constexpr const char* kParamPan           = "pan";
+
 	// Chaos
 	static constexpr const char* kParamChaos         = "chaos";
 	static constexpr const char* kParamChaosD        = "chaos_d";
@@ -112,6 +115,11 @@ public:
 	static constexpr float kTiltMin     = -6.0f;
 	static constexpr float kTiltMax     =  6.0f;
 	static constexpr float kTiltDefault =  0.0f;
+
+	// Pan range
+	static constexpr float kPanMin     = 0.0f;
+	static constexpr float kPanMax     = 1.0f;
+	static constexpr float kPanDefault = 0.5f;
 
 	// Chaos ranges
 	static constexpr float kChaosAmtMin     = 0.0f;
@@ -329,6 +337,11 @@ private:
 	std::atomic<float>* chaosSpdParam      = nullptr;
 	std::atomic<float>* chaosAmtFilterParam = nullptr;
 	std::atomic<float>* chaosSpdFilterParam = nullptr;
+
+	std::atomic<float>* panParam       = nullptr;
+	float lastPan_      = -1.0f;
+	float lastPanLeft_  = 1.0f;
+	float lastPanRight_ = 1.0f;
 
 	std::atomic<float>* uiWidthParam   = nullptr;
 	std::atomic<float>* uiHeightParam  = nullptr;

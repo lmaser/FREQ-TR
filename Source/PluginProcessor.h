@@ -42,6 +42,11 @@ public:
 	// Pan
 	static constexpr const char* kParamPan           = "pan";
 
+	// Mode In / Mode Out / Sum Bus
+	static constexpr const char* kParamModeIn        = "mode_in";
+	static constexpr const char* kParamModeOut       = "mode_out";
+	static constexpr const char* kParamSumBus        = "sum_bus";
+
 	// Chaos
 	static constexpr const char* kParamChaos         = "chaos";
 	static constexpr const char* kParamChaosD        = "chaos_d";
@@ -128,6 +133,11 @@ public:
 	static constexpr float kChaosSpdMin     = 0.01f;
 	static constexpr float kChaosSpdMax     = 100.0f;
 	static constexpr float kChaosSpdDefault = 5.0f;
+
+	// Mode In / Mode Out / Sum Bus defaults
+	static constexpr int   kModeInOutDefault = 0;
+	static constexpr int   kSumBusDefault    = 0;
+	static constexpr float kSqrt2Over2       = 0.707106781f;
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -339,6 +349,9 @@ private:
 	std::atomic<float>* chaosSpdFilterParam = nullptr;
 
 	std::atomic<float>* panParam       = nullptr;
+	std::atomic<float>* modeInParam    = nullptr;
+	std::atomic<float>* modeOutParam   = nullptr;
+	std::atomic<float>* sumBusParam    = nullptr;
 	float lastPan_      = -1.0f;
 	float lastPanLeft_  = 1.0f;
 	float lastPanRight_ = 1.0f;

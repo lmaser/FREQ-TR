@@ -242,6 +242,32 @@ void FREQTRAudioProcessorEditor::MinimalLNF::drawScrollbar (juce::Graphics& g, j
     }
 }
 
+void FREQTRAudioProcessorEditor::MinimalLNF::drawComboBox (
+    juce::Graphics& g, int width, int height,
+    bool /*isButtonDown*/, int /*buttonX*/, int /*buttonY*/,
+    int /*buttonW*/, int /*buttonH*/, juce::ComboBox& /*box*/)
+{
+    const juce::Rectangle<int> r (0, 0, width, height);
+    g.setColour (scheme.bg);
+    g.fillRect (r);
+    g.setColour (scheme.outline);
+    g.drawRect (r, 3);
+}
+
+void FREQTRAudioProcessorEditor::MinimalLNF::drawPopupMenuBackground (
+    juce::Graphics& g, int width, int height)
+{
+    g.fillAll (scheme.bg);
+    g.setColour (scheme.outline);
+    g.drawRect (0, 0, width, height, 2);
+}
+
+juce::Font FREQTRAudioProcessorEditor::MinimalLNF::getComboBoxFont (juce::ComboBox& box)
+{
+    const float h = juce::jlimit (10.0f, 18.0f, box.getHeight() * 0.55f);
+    return juce::Font (juce::FontOptions (h).withStyle ("Bold"));
+}
+
 juce::Font FREQTRAudioProcessorEditor::MinimalLNF::getTextButtonFont (juce::TextButton&, int buttonHeight)
 {
     const float h = juce::jlimit (12.0f, 26.0f, buttonHeight * 0.48f);
@@ -659,6 +685,30 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         chaosDelayDisplay.setVisible (false);
     }
 
+    // Mode In / Mode Out / Sum Bus combos
+    {
+        auto setupModeCombo = [this] (juce::ComboBox& combo)
+        {
+            addAndMakeVisible (combo);
+            combo.addItem ("L+R",  1);
+            combo.addItem ("MID",  2);
+            combo.addItem ("SIDE", 3);
+            combo.setJustificationType (juce::Justification::centred);
+            combo.setLookAndFeel (&lnf);
+            combo.setVisible (false);
+        };
+        setupModeCombo (modeInCombo);
+        setupModeCombo (modeOutCombo);
+
+        addAndMakeVisible (sumBusCombo);
+        sumBusCombo.addItem ("ST",              1);
+        sumBusCombo.addItem (juce::String::fromUTF8 (u8"\u2192M"), 2);
+        sumBusCombo.addItem (juce::String::fromUTF8 (u8"\u2192S"), 3);
+        sumBusCombo.setJustificationType (juce::Justification::centred);
+        sumBusCombo.setLookAndFeel (&lnf);
+        sumBusCombo.setVisible (false);
+    }
+
     syncButton.setButtonText ("");
     midiButton.setButtonText ("");
     alignButton.setButtonText ("");
@@ -731,6 +781,10 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindButton (chaosFilterAttachment, FREQTRAudioProcessor::kParamChaos, chaosFilterButton);
     bindButton (chaosDelayAttachment,  FREQTRAudioProcessor::kParamChaosD, chaosDelayButton);
 
+    modeInAttachment  = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamModeIn,  modeInCombo);
+    modeOutAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamModeOut, modeOutCombo);
+    sumBusAttachment  = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamSumBus,  sumBusCombo);
+
     for (auto* paramId : kUiMirrorParamIds)
         audioProcessor.apvts.addParameterListener (paramId, this);
 
@@ -786,6 +840,10 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
 
     if (tooltipWindow != nullptr)
         tooltipWindow->setLookAndFeel (nullptr);
+
+    modeInCombo.setLookAndFeel (nullptr);
+    modeOutCombo.setLookAndFeel (nullptr);
+    sumBusCombo.setLookAndFeel (nullptr);
 
     setLookAndFeel (nullptr);
 }
@@ -3415,14 +3473,14 @@ void FREQTRAudioProcessorEditor::openChaosFilterPrompt()
 {
     openChaosConfigPrompt (FREQTRAudioProcessor::kParamChaosAmtFilter,
                            FREQTRAudioProcessor::kParamChaosSpdFilter,
-                           "CHS F");
+                           "CHSF");
 }
 
 void FREQTRAudioProcessorEditor::openChaosDelayPrompt()
 {
     openChaosConfigPrompt (FREQTRAudioProcessor::kParamChaosAmt,
                            FREQTRAudioProcessor::kParamChaosSpd,
-                           "CHS D");
+                           "CHSD");
 }
 
 void FREQTRAudioProcessorEditor::openInfoPopup()
@@ -3945,7 +4003,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // CHS F label click → toggle (left), config (right)
+    // CHSF label click → toggle (left), config (right)
     if (chaosFilterButton.isVisible())
     {
         const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
@@ -3964,7 +4022,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         }
     }
 
-    // CHS D label click → toggle (left), config (right)
+    // CHSD label click → toggle (left), config (right)
     if (chaosDelayButton.isVisible())
     {
         const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
@@ -4105,7 +4163,12 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
     // 2 button rows: row1 = SYNC+MIDI, row2 = ALIGN+PDC
     m.btnRow2Y = editorH - m.bottomMargin - m.box;
     m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
-    m.availableForSliders = juce::jmax (40, m.btnRow1Y - m.betweenSlidersAndButtons - m.topMargin);
+
+    // When IO is expanded, chaos checkboxes sit as a 3rd button row above btnRow1
+    m.chaosRowY = ioExpanded ? (m.btnRow1Y - m.btnRowGap - m.box) : 0;
+
+    const int sliderBottomRef = ioExpanded ? m.chaosRowY : m.btnRow1Y;
+    m.availableForSliders = juce::jmax (40, sliderBottomRef - m.betweenSlidersAndButtons - m.topMargin);
 
     // Bars below toggle: 7 IO bars when expanded (IN, OUT, TILT, FILTER, PAN, MIX, CHAOS), 7 main bars when collapsed.
     // Toggle bar stays fixed — only bar/gap sizing adapts to the visible count.
@@ -4566,14 +4629,33 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
         drawToggleLabel (syncButton,  "SYNC",  syncCR);
         drawToggleLabel (midiButton,  "MIDI",  midiCR);
 
+        // Mode In / Mode Out / Sum Bus labels above combos
+        if (modeInCombo.isVisible())
+        {
+            const auto font = juce::Font (juce::FontOptions (11.0f).withStyle ("Bold"));
+            g.setFont (font);
+            auto drawComboLabel = [&] (const juce::ComboBox& combo, const juce::String& full, const juce::String& shortTxt)
+            {
+                const auto area = combo.getBounds().withHeight (14).translated (0, -15);
+                const float comboW = (float) combo.getWidth();
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (font, full, 0.0f, 0.0f);
+                const bool useShort = ga.getBoundingBox (0, -1, false).getWidth() > comboW;
+                g.drawText (useShort ? shortTxt : full, area, juce::Justification::centred);
+            };
+            drawComboLabel (modeInCombo,  "MODE IN",  "IN");
+            drawComboLabel (modeOutCombo, "MODE OUT", "OUT");
+            drawComboLabel (sumBusCombo,  "SUM BUS",  "SUM");
+        }
+
         if (chaosFilterButton.isVisible())
         {
             const int chsFCR = chaosDelayButton.isVisible()
                              ? chaosDelayButton.getX() - kToggleLegendCollisionPadPx
                              : W - kToggleLegendCollisionPadPx;
             const int chsDCR = W - kToggleLegendCollisionPadPx;
-            drawToggleLabel (chaosFilterButton, "CHS F", chsFCR);
-            drawToggleLabel (chaosDelayButton,  "CHS D", chsDCR);
+            drawToggleLabel (chaosFilterButton, "CHSF", chsFCR);
+            drawToggleLabel (chaosDelayButton,  "CHSD", chsDCR);
         }
     }
 
@@ -4649,15 +4731,34 @@ void FREQTRAudioProcessorEditor::resized()
         panSlider.setBounds     (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
         mixSlider.setBounds     (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
 
-        // Chaos buttons at row 6
-        const int chaosY = mainTop + 6 * step;
+        const int modeRowPad = 10;
+
+        // Mode In / Mode Out / Sum Bus — 3 combos on row 6
+        {
+            const int modeY = mainTop + 6 * step + modeRowPad;
+            const int comboGap = 4;
+            const int totalW = horizontalLayout.barW + horizontalLayout.valuePad + horizontalLayout.valueW;
+            const int comboW = (totalW - comboGap * 2) / 3;
+            const int comboH = juce::jmax (24, verticalLayout.barH);
+            modeInCombo.setBounds  (horizontalLayout.leftX,                           modeY, comboW, comboH);
+            modeOutCombo.setBounds (horizontalLayout.leftX + comboW + comboGap,        modeY, comboW, comboH);
+            sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGap) * 2,  modeY, comboW, comboH);
+        }
+
+        // Chaos buttons at chaosRowY
+        const int chaosY = verticalLayout.chaosRowY;
+        const int chaosH = verticalLayout.box;
         const int chaosRightX = horizontalLayout.leftX + horizontalLayout.barW + horizontalLayout.valuePad;
         const int chaosLeftW  = chaosRightX - horizontalLayout.leftX;
         const int chaosRightW = horizontalLayout.leftX + horizontalLayout.contentW - chaosRightX;
-        chaosFilterButton.setBounds  (horizontalLayout.leftX, chaosY, chaosLeftW,  verticalLayout.box);
-        chaosFilterDisplay.setBounds (horizontalLayout.leftX, chaosY, chaosLeftW,  verticalLayout.box);
-        chaosDelayButton.setBounds   (chaosRightX,            chaosY, chaosRightW, verticalLayout.box);
-        chaosDelayDisplay.setBounds  (chaosRightX,            chaosY, chaosRightW, verticalLayout.box);
+        chaosFilterButton.setBounds  (horizontalLayout.leftX, chaosY, chaosLeftW,  chaosH);
+        chaosFilterDisplay.setBounds (horizontalLayout.leftX, chaosY, chaosLeftW,  chaosH);
+        chaosDelayButton.setBounds   (chaosRightX,            chaosY, chaosRightW, chaosH);
+        chaosDelayDisplay.setBounds  (chaosRightX,            chaosY, chaosRightW, chaosH);
+
+        modeInCombo.setVisible (true);
+        modeOutCombo.setVisible (true);
+        sumBusCombo.setVisible (true);
         chaosFilterButton.setVisible (true);
         chaosFilterDisplay.setVisible (true);
         chaosDelayButton.setVisible (true);
@@ -4692,6 +4793,9 @@ void FREQTRAudioProcessorEditor::resized()
         chaosFilterDisplay.setVisible (false);
         chaosDelayButton.setVisible (false);
         chaosDelayDisplay.setVisible (false);
+        modeInCombo.setVisible (false);
+        modeOutCombo.setVisible (false);
+        sumBusCombo.setVisible (false);
         inputSlider.setBounds (0, 0, 0, 0);
         outputSlider.setBounds (0, 0, 0, 0);
         tiltSlider.setBounds (0, 0, 0, 0);

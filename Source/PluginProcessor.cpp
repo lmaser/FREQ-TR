@@ -201,6 +201,9 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 
 	tiltParam          = apvts.getRawParameterValue (kParamTilt);
 	panParam           = apvts.getRawParameterValue (kParamPan);
+	modeInParam        = apvts.getRawParameterValue (kParamModeIn);
+	modeOutParam       = apvts.getRawParameterValue (kParamModeOut);
+	sumBusParam        = apvts.getRawParameterValue (kParamSumBus);
 	chaosParam         = apvts.getRawParameterValue (kParamChaos);
 	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
 	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
@@ -767,6 +770,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		chaosFilterMaxOct_ = 0.0f;
 	}
 
+	// ── Mode In / Mode Out / Sum Bus ──
+	const int modeInVal  = loadIntParamOrDefault (modeInParam,  kModeInOutDefault);
+	const int modeOutVal = loadIntParamOrDefault (modeOutParam, kModeInOutDefault);
+	const int sumBusVal  = loadIntParamOrDefault (sumBusParam,  kSumBusDefault);
+
 	for (int n = 0; n < numSamples; ++n)
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
@@ -795,12 +803,20 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float inL = (writeL != nullptr) ? writeL[n] : 0.0f;
 		const float inR = (writeR != nullptr) ? writeR[n] : inL;
 
+		// Mode In: M/S encode input
+		float mInL = inL, mInR = inR;
+		if (numChannels >= 2 && modeInVal != 0)
+		{
+			if (modeInVal == 1)      { const float mid  = (inL + inR) * kSqrt2Over2; mInL = mInR = mid; }
+			else /* modeInVal==2 */   { const float side = (inL - inR) * kSqrt2Over2; mInL = mInR = side; }
+		}
+
 		// Feedback: cross for WIDE, independent otherwise
 		const float fb = feedbackSmoothed.getNextValue();
 		const float fbSrcL = (style == 2) ? feedbackLastR : feedbackLastL;
 		const float fbSrcR = (style == 2) ? feedbackLastL : feedbackLastR;
-		const float fbInL = inL + fb * fbSrcL;
-		const float fbInR = inR + fb * fbSrcR;
+		const float fbInL = mInL + fb * fbSrcL;
+		const float fbInR = mInR + fb * fbSrcR;
 
 		// Write into circular Hilbert input buffer
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
@@ -967,13 +983,40 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			wetR *= gainLin;
 		}
 
-		// ── Mix (dry = delayed or direct depending on ALIGN) ──
-		const float dryL = alignEnabled ? realL : inL;
-		const float dryR = alignEnabled ? realR : inR;
-		const float wetGainedL = wetL * smoothedInputGain * smoothedOutputGain;
-		const float wetGainedR = wetR * smoothedInputGain * smoothedOutputGain;
-		const float outL = dryL + smoothedMix * (wetGainedL - dryL);
-		const float outR = dryR + smoothedMix * (wetGainedR - dryR);
+		// Mode Out: M/S encode wet output
+		if (numChannels >= 2 && modeOutVal != 0)
+		{
+			const float l = wetL, r = wetR;
+			if (modeOutVal == 1)      { const float mid  = (l + r) * kSqrt2Over2; wetL = wetR = mid; }
+			else /* modeOutVal==2 */   { const float side = (l - r) * kSqrt2Over2; wetL = wetR = side; }
+		}
+
+		// ── Mix dry/wet with Sum Bus routing ──
+		const float dryRefL = alignEnabled ? realL : inL;
+		const float dryRefR = alignEnabled ? realR : inR;
+		const float wL = wetL * smoothedInputGain * smoothedOutputGain * smoothedMix;
+		const float wR = wetR * smoothedInputGain * smoothedOutputGain * smoothedMix;
+		const float dL = dryRefL * (1.0f - smoothedMix);
+		const float dR = dryRefR * (1.0f - smoothedMix);
+
+		float outL, outR;
+		if (sumBusVal == 0) // ST: normal stereo
+		{
+			outL = dL + wL;
+			outR = dR + wR;
+		}
+		else if (sumBusVal == 1) // →M: wet collapsed to mono mid
+		{
+			const float midBus = (wL + wR) * 0.5f;
+			outL = dL + midBus;
+			outR = dR + midBus;
+		}
+		else // →S: wet collapsed to side
+		{
+			const float sideBus = (wL - wR) * 0.5f;
+			outL = dL + sideBus;
+			outR = dR - sideBus;
+		}
 
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
@@ -1164,6 +1207,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamChaosSpdFilter, "Chaos Spd Filter",
 		juce::NormalisableRange<float> (kChaosSpdMin, kChaosSpdMax, 0.01f, 0.3f), kChaosSpdDefault));
+
+	// Mode In / Mode Out / Sum Bus
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamModeIn, "Mode In", juce::StringArray { "L+R", "MID", "SIDE" }, kModeInOutDefault));
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamModeOut, "Mode Out", juce::StringArray { "L+R", "MID", "SIDE" }, kModeInOutDefault));
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamSumBus, "Sum Bus", juce::StringArray { "ST", u8"\u2192M", u8"\u2192S" }, kSumBusDefault));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

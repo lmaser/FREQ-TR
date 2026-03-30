@@ -415,6 +415,13 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	chaosParamSmoothCoeff_ = 0.999f;
 	std::memset (chaosDelayBuf_, 0, sizeof (chaosDelayBuf_));
 	chaosDelayWritePos_ = 0;
+
+	// Precompute sampleRate-dependent smooth coefficients
+	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
+	cachedChaosDSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.030f));
+	cachedChaosGSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.015f));
+	cachedChaosFSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.060f));
+	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 }
 
 void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
@@ -669,7 +676,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	targetFreq = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, targetFreq);
 
 	// Frequency smoothing (EMA, ~5ms) with MIDI glide support
-	float freqCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
+	float freqCoeff = cachedFreqEmaCoeff_;
 
 	// MIDI velocity-controlled glide
 	if (midiNoteActive)
@@ -686,7 +693,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	}
 
 	// EMA coefficient for mix/engine/shape (~5 ms)
-	const float paramCoeff = std::exp (-1.0f / (float (currentSampleRate) * 0.005f));
+	const float paramCoeff = cachedFreqEmaCoeff_;
 
 	feedbackSmoothed.setTargetValue (targetFeedback);
 
@@ -732,10 +739,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float amtNormD = rawAmtD * 0.01f;
 			chaosDelayMaxSamples_ = amtNormD * 0.005f * (float) currentSampleRate;  // ±5ms at 100%
 			chaosGainMaxDb_       = amtNormD * 1.0f;                                // ±1dB at 100%
-			constexpr float kChaosDTau = 0.030f;
-			chaosDSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosDTau));
-			constexpr float kChaosGTau = 0.015f;
-			chaosGSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosGTau));
+			chaosDSmoothCoeff_ = cachedChaosDSmoothCoeff_;
+			chaosGSmoothCoeff_ = cachedChaosGSmoothCoeff_;
 		}
 		else
 		{
@@ -751,16 +756,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			chaosShPeriodF_  = (float) currentSampleRate / rawSpdF;
 			const float amtNormF = rawAmtF * 0.01f;
 			chaosFilterMaxOct_ = amtNormF * 2.0f;  // ±2 oct at 100%
-			constexpr float kChaosFTau = 0.060f;
-			chaosFSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosFTau));
+			chaosFSmoothCoeff_ = cachedChaosFSmoothCoeff_;
 		}
 		else
 		{
 			chaosFilterMaxOct_ = 0.0f;
 		}
 
-		constexpr float kChaosParamTau = 0.010f;
-		chaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kChaosParamTau));
+		chaosParamSmoothCoeff_ = cachedChaosParamSmoothCoeff_;
 	}
 	else
 	{
@@ -1221,7 +1224,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiHeight, "UI Height", 240, 1200, 480));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamUiPalette, "UI Palette", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamUiCrt, "UI CRT", false));
-	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiColor0, "UI Color 0", 0, 0xFFFFFF, 0xFFFFFF));
+	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiColor0, "UI Color 0", 0, 0xFFFFFF, 0x00FF00));
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiColor1, "UI Color 1", 0, 0xFFFFFF, 0x000000));
 
 	return { params.begin(), params.end() };

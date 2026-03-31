@@ -99,6 +99,14 @@ The Hilbert FIR's 64-sample group delay (~1.5 ms at 44.1 kHz) acts as the natura
 
 The feedback path includes a one-pole DC blocker at ~5 Hz and a safety limiter at ±4.0. The effective maximum feedback is capped at 97% internally to compensate for the Hilbert FIR's passband ripple, ensuring stable sustain without divergence.
 
+### COMB (5–750 Hz)
+
+Resonant frequency of the feedback delay line. Controls the delay length in the feedback path, producing comb-filter resonances at the set frequency and its harmonics.
+
+Only active when FEEDBACK > 0. At the default value (5 Hz) the delay is long enough to be inaudible as a pitch — raising COMB shortens the delay and tunes the resonance upward.
+
+The slider uses a logarithmic scale for fine control at low frequencies. The display shows the current frequency in Hz.
+
 ### ENGINE (0–100%)
 
 Blend between amplitude modulation and frequency shifting.  
@@ -183,6 +191,24 @@ Each chaos target has its own toggle and shares two global controls:
 
 Uses exponential smoothing between random targets for glitch-free transitions.
 
+### LIM THRESHOLD (−36 to 0 dB)
+
+Peak limiter threshold. Sets the ceiling above which the limiter engages.
+At 0 dB (default) the limiter acts as a transparent safety net. Lower values compress the signal harder.
+
+### LIM MODE
+
+Limiter insertion point:
+- **NONE**: Limiter disabled.
+- **WET**: Limiter applied to the wet signal only (after processing, before dry/wet mix).
+- **GLOBAL**: Limiter applied to the final output (after output gain and dry/wet mix).
+
+The limiter is a dual-stage transparent peak limiter:
+- **Stage 1 (Leveler)**: 2 ms attack, 10 ms release — catches sustained overs.
+- **Stage 2 (Brickwall)**: Instant attack, 100 ms release — catches transient peaks.
+
+Stereo-linked gain reduction ensures consistent imaging.
+
 ## Technical Details
 
 ### DSP Architecture
@@ -227,3 +253,5 @@ Uses exponential smoothing between random targets for glitch-free transitions.
 - Numeric entry popup for percentage sliders: precision standardized to 1 decimal place.
 - Ported `drawToggleButton` with automatic text-shrinking from CAB-TR for consistent toggle rendering.
 - Fixed checkbox sizing and tick-box rendering to match TR-series style.
+- Added COMB parameter (5–750 Hz) — tunes the feedback delay line resonant frequency, producing controllable comb-filter harmonics when FEEDBACK > 0.
+- Added dual-stage transparent peak limiter with LIM THRESHOLD (−36 to 0 dB) and LIM MODE (NONE/WET/GLOBAL). Stereo-linked gain reduction with 2 ms/10 ms leveler + instant/100 ms brickwall stages.

@@ -19,6 +19,11 @@ namespace
 		return loadAtomicOrDefault (p, def ? 1.0f : 0.0f) > 0.5f;
 	}
 
+	inline float fastDecibelsToGain (float dB) noexcept
+	{
+		return (dB <= -100.0f) ? 0.0f : std::exp2 (dB * 0.16609640474f);
+	}
+
 	inline void setParameterPlainValue (juce::AudioProcessorValueTreeState& apvts,
 										const char* paramId,
 										float plainValue)
@@ -180,6 +185,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	freqParam    = apvts.getRawParameterValue (kParamFreq);
 	modParam     = apvts.getRawParameterValue (kParamMod);
 	feedbackParam = apvts.getRawParameterValue (kParamFeedback);
+	combParam     = apvts.getRawParameterValue (kParamComb);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
 	shapeParam   = apvts.getRawParameterValue (kParamShape);
@@ -204,6 +210,8 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	modeInParam        = apvts.getRawParameterValue (kParamModeIn);
 	modeOutParam       = apvts.getRawParameterValue (kParamModeOut);
 	sumBusParam        = apvts.getRawParameterValue (kParamSumBus);
+	limThresholdParam  = apvts.getRawParameterValue (kParamLimThreshold);
+	limModeParam       = apvts.getRawParameterValue (kParamLimMode);
 	chaosParam         = apvts.getRawParameterValue (kParamChaos);
 	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
 	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
@@ -344,6 +352,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	// Circular buffers for FIR convolution
 	hilbertBufL.assign ((size_t) kHilbertOrder, 0.0f);
 	hilbertBufR.assign ((size_t) kHilbertOrder, 0.0f);
+	cleanDelayBufL.assign ((size_t) kHilbertOrder, 0.0f);
+	cleanDelayBufR.assign ((size_t) kHilbertOrder, 0.0f);
 
 	hilbertPos = 0;
 	oscPhase = 0.0;
@@ -359,6 +369,13 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
 	feedbackLastL = 0.0f;
 	feedbackLastR = 0.0f;
+	std::memset (fbkDelayBufL, 0, sizeof (fbkDelayBufL));
+	std::memset (fbkDelayBufR, 0, sizeof (fbkDelayBufR));
+	fbkDelayWritePos = 0;
+	{
+		const float initCombHz = juce::jlimit (kCombMin, kCombMax, loadAtomicOrDefault (combParam, kCombDefault));
+		smoothedComb_ = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) initCombHz) - kHilbertDelay);
+	}
 
 	// DC blocker coefficient: R = e^(-2π * fHP / fs)
 	fbkDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * kFbkDcBlockHz / (float) currentSampleRate);
@@ -422,6 +439,13 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	cachedChaosGSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.015f));
 	cachedChaosFSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.060f));
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
+
+	// Limiter state reset
+	limEnv1_[0] = limEnv1_[1] = kLimFloor;
+	limEnv2_[0] = limEnv2_[1] = kLimFloor;
+	limAtt1_ = std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
+	limRel1_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
+	limRel2_ = std::exp (-1.0f / ((float) currentSampleRate * 0.100f));
 }
 
 void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
@@ -589,6 +613,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float modVal = loadAtomicOrDefault (modParam, kModDefault);
 	const float rawFeedback = juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
 	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
+	const float combHz = juce::jlimit (kCombMin, kCombMax,
+		loadAtomicOrDefault (combParam, kCombDefault));
+	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz) - kHilbertDelay);
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float shape  = loadAtomicOrDefault (shapeParam, kShapeDefault);
@@ -598,6 +625,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float outputDb = loadAtomicOrDefault (outputParam, kOutputDefault);
 	const float inputGain  = juce::Decibels::decibelsToGain (inputDb, -100.0f);
 	const float outputGain = juce::Decibels::decibelsToGain (outputDb, -100.0f);
+
+	// ── Limiter ──
+	const int limMode = loadIntParamOrDefault (limModeParam, kLimModeDefault);
+	const float limThreshLin = (limMode != 0)
+		? fastDecibelsToGain (loadAtomicOrDefault (limThresholdParam, kLimThresholdDefault))
+		: 1.0f;
+
 	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
 	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
@@ -735,7 +769,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float rawAmtD = loadAtomicOrDefault (chaosAmtParam, kChaosAmtDefault);
 			const float rawSpdD = loadAtomicOrDefault (chaosSpdParam, kChaosSpdDefault);
 			chaosAmtD_       = rawAmtD;
-			chaosShPeriodD_  = (float) currentSampleRate / rawSpdD;
+			chaosShPeriodD_  = (float) currentSampleRate / juce::jmax (0.01f, rawSpdD);
 			const float amtNormD = rawAmtD * 0.01f;
 			chaosDelayMaxSamples_ = amtNormD * 0.005f * (float) currentSampleRate;  // ±5ms at 100%
 			chaosGainMaxDb_       = amtNormD * 1.0f;                                // ±1dB at 100%
@@ -753,7 +787,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float rawAmtF = loadAtomicOrDefault (chaosAmtFilterParam, kChaosAmtDefault);
 			const float rawSpdF = loadAtomicOrDefault (chaosSpdFilterParam, kChaosSpdDefault);
 			chaosAmtF_       = rawAmtF;
-			chaosShPeriodF_  = (float) currentSampleRate / rawSpdF;
+			chaosShPeriodF_  = (float) currentSampleRate / juce::jmax (0.01f, rawSpdF);
 			const float amtNormF = rawAmtF * 0.01f;
 			chaosFilterMaxOct_ = amtNormF * 2.0f;  // ±2 oct at 100%
 			chaosFSmoothCoeff_ = cachedChaosFSmoothCoeff_;
@@ -814,12 +848,28 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			else /* modeInVal==2 */   { const float side = (inL - inR) * kSqrt2Over2; mInL = mInR = side; }
 		}
 
-		// Feedback: cross for WIDE, independent otherwise
+		// Write clean input into Hilbert buffer (no feedback — keeps Hilbert clean)
+		cleanDelayBufL[(size_t) hilbertPos] = mInL;
+		cleanDelayBufR[(size_t) hilbertPos] = mInR;
+
+		// Feedback: read from Comb-controlled delay line
 		const float fb = feedbackSmoothed.getNextValue();
-		const float fbSrcL = (style == 2) ? feedbackLastR : feedbackLastL;
-		const float fbSrcR = (style == 2) ? feedbackLastL : feedbackLastR;
-		const float fbInL = mInL + fb * fbSrcL;
-		const float fbInR = mInR + fb * fbSrcR;
+		const float effectiveFb = (std::abs (smoothedFreq) < 0.001f) ? 0.0f : fb;
+
+		// Smooth the comb size to avoid clicks
+		smoothedComb_ = smoothedComb_ * 0.999f + targetComb * 0.001f;
+		const int combSamples = juce::jlimit (1, kFbkDelayMaxSamples,
+			(int) std::round (smoothedComb_));
+
+		// Read feedback from delay line at Comb offset
+		const int fbReadPos = (fbkDelayWritePos - combSamples + kFbkDelayMaxSamples)
+			% kFbkDelayMaxSamples;
+		const float fbSrcL = (style == 2) ? fbkDelayBufR[fbReadPos] : fbkDelayBufL[fbReadPos];
+		const float fbSrcR = (style == 2) ? fbkDelayBufL[fbReadPos] : fbkDelayBufR[fbReadPos];
+
+		// Inject feedback pre-Hilbert (creative comb effect)
+		const float fbInL = mInL + effectiveFb * fbSrcL;
+		const float fbInR = mInR + effectiveFb * fbSrcR;
 
 		// Write into circular Hilbert input buffer
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
@@ -851,17 +901,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 							  + csiFrac * (shapeGainTable[(size_t) csi1] - shapeGainTable[(size_t) csi0]);
 
 		// ── Oscillator: morphed waveforms (RMS-normalized, LUT-accelerated) ──
-		// "sin" role: morphedWave(phase)
-		// "cos" role: morphedWave(phase + 0.25)  (90° quadrature offset)
-		// At shape=0 these equal pure sin/cos; at shape>0 each harmonic
-		// of the waveform creates its own frequency shift.
 		const float oscWave     = fastMorphedWave ((float) oscPhase,          smoothedShape) * curShapeGain;
 		const float oscWaveCos  = fastMorphedWave ((float) oscPhase  + 0.25f, smoothedShape) * curShapeGain;
 		const float oscWaveR    = fastMorphedWave ((float) oscPhaseR,         smoothedShape) * curShapeGain;
 		const float oscWaveCosR = fastMorphedWave ((float) oscPhaseR + 0.25f, smoothedShape) * curShapeGain;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
-		//  0=MONO, 1=STEREO (same shift both), 2=WIDE (opposite sideband + cross-fbk), 3=DUAL (×0.5 + independent)
 		const bool useStereoInput = (style >= 1);
 		float wetL, wetR;
 
@@ -875,30 +920,33 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			// AM: input × wave (ring modulation at engine=0)
 			const float amL = realL * oscWave;
 			const float amR = useStereoInput
-				? (style == 2 ? (realR * -oscWave)                // WIDE: inverted carrier → side enhancement
-				  : (style == 3 ? (realR * oscWaveR)              // DUAL: independent oscillator
-				                : (realR * oscWave)))              // STEREO: shared oscillator
-				: amL;                                             // MONO
+				? (style == 2 ? (realR * -oscWave)
+				  : (style == 3 ? (realR * oscWaveR)
+				                : (realR * oscWave)))
+				: amL;
 
 			// Freq Shift: Re[ analytic × e^(j2πft) ] = real·cos − hilbert·sin
-			// Shape > 0 adds harmonic frequency shifts via non-sinusoidal oscillator.
-			// WIDE: R uses opposite sideband (real·cos + hilbert·sin) → lower sideband
 			const float fsL = realL * oscWaveCos - hilbL * oscWave;
 			const float fsR = useStereoInput
-				? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)         // WIDE: lower sideband
-				  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)   // DUAL: independent shift
-				                : (realR * oscWaveCos - hilbR * oscWave)))   // STEREO: same shift
-				: fsL;                                                       // MONO
+				? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)
+				  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)
+				                : (realR * oscWaveCos - hilbR * oscWave)))
+				: fsL;
 
 			wetL = amL + smoothedEngine * (fsL - amL);
 			wetR = amR + smoothedEngine * (fsR - amR);
 		}
 
-		// Feedback path: biquad LPF (kill HF near Nyquist) → DC blocker → safety limiter
-		feedbackLastL = juce::jlimit (-4.0f, 4.0f,
-			dcBlockTick (biquadTick (wetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
-		feedbackLastR = juce::jlimit (-4.0f, 4.0f,
-			dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
+		// Write conditioned wet into feedback delay line
+		{
+			const float condL = juce::jlimit (-4.0f, 4.0f,
+				dcBlockTick (biquadTick (wetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
+			const float condR = juce::jlimit (-4.0f, 4.0f,
+				dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
+			fbkDelayBufL[fbkDelayWritePos] = condL;
+			fbkDelayBufR[fbkDelayWritePos] = condR;
+			fbkDelayWritePos = (fbkDelayWritePos + 1) % kFbkDelayMaxSamples;
+		}
 
 		// ── Advance chaos S&H ──
 		if (chaosDelayEnabled_) advanceChaosD();
@@ -995,10 +1043,17 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		// ── Mix dry/wet with Sum Bus routing ──
-		const float dryRefL = alignEnabled ? realL : inL;
-		const float dryRefR = alignEnabled ? realR : inR;
-		const float wL = wetL * smoothedInputGain * smoothedOutputGain * smoothedMix;
-		const float wR = wetR * smoothedInputGain * smoothedOutputGain * smoothedMix;
+		// Use clean delay buffer for dry reference (feedback-free)
+		const float cleanDryL = cleanDelayBufL[(size_t) delayIdx];
+		const float cleanDryR = cleanDelayBufR[(size_t) delayIdx];
+		const float dryRefL = alignEnabled ? cleanDryL : inL;
+		const float dryRefR = alignEnabled ? cleanDryR : inR;
+		float wL = wetL * smoothedInputGain * smoothedOutputGain;
+		float wR = wetR * smoothedInputGain * smoothedOutputGain;
+		if (limMode == 1)
+			applyLimiterSample (wL, wR, limThreshLin);
+		wL *= smoothedMix;
+		wR *= smoothedMix;
 		const float dL = dryRefL * (1.0f - smoothedMix);
 		const float dR = dryRefR * (1.0f - smoothedMix);
 
@@ -1053,6 +1108,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			buffer.applyGain (0, 0, numSamples, lastPanLeft_);
 			buffer.applyGain (1, 0, numSamples, lastPanRight_);
 		}
+	}
+
+	// ── User limiter (GLOBAL: after pan, before safety clip) ──
+	if (limMode == 2)
+	{
+		if (buffer.getNumChannels() >= 2)
+			applyLimiter (buffer.getWritePointer (0), buffer.getWritePointer (1), numSamples, limThreshLin);
 	}
 
 	// ── Safety limiter: +48 dBFS — only catches runaways ──
@@ -1127,6 +1189,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamFeedback, "Feedback",
 		juce::NormalisableRange<float> (kFeedbackMin, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
+	// Comb: resonant frequency in Hz (5..750), controls feedback comb pitch
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamComb, "Comb",
+		juce::NormalisableRange<float> (kCombMin, kCombMax, 0.01f, 0.35f), kCombDefault));
 	// Engine: 0 = AM, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",
@@ -1218,6 +1284,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kParamModeOut, "Mode Out", juce::StringArray { "L+R", "MID", "SIDE" }, kModeInOutDefault));
 	params.push_back (std::make_unique<juce::AudioParameterChoice> (
 		kParamSumBus, "Sum Bus", juce::StringArray { "ST", u8"\u2192M", u8"\u2192S" }, kSumBusDefault));
+
+	// Limiter
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamLimThreshold, "Lim Threshold",
+		juce::NormalisableRange<float> (kLimThresholdMin, kLimThresholdMax, 0.1f), kLimThresholdDefault));
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamLimMode, "Lim Mode", juce::StringArray { "NONE", "WET", "GLOBAL" }, kLimModeDefault));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

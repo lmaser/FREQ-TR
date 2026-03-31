@@ -119,19 +119,21 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 12 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, ENGINE, SHAPE, POLARITY, STYLE, TILT, PAN
+    // 14 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, SHAPE, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
     BarSlider freqSlider;
     BarSlider modSlider;
     BarSlider feedbackSlider;
+    BarSlider combSlider;
     BarSlider engineSlider;
     BarSlider shapeSlider;
     BarSlider polaritySlider;
     BarSlider styleSlider;
     BarSlider tiltSlider;
     BarSlider panSlider;
+    BarSlider limThresholdSlider;
 
     using FREQScheme = TR::TRScheme;
 
@@ -201,6 +203,7 @@ private:
     juce::ComboBox modeInCombo;
     juce::ComboBox modeOutCombo;
     juce::ComboBox sumBusCombo;
+    juce::ComboBox limModeCombo;
 
     juce::Label midiChannelDisplay;
     juce::Label retrigDisplay;
@@ -213,6 +216,7 @@ private:
     std::unique_ptr<SliderAttachment> freqSyncAttachment;
     std::unique_ptr<SliderAttachment> modAttachment;
     std::unique_ptr<SliderAttachment> feedbackAttachment;
+    std::unique_ptr<SliderAttachment> combAttachment;
     std::unique_ptr<SliderAttachment> engineAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
     std::unique_ptr<SliderAttachment> shapeAttachment;
@@ -222,6 +226,7 @@ private:
     std::unique_ptr<SliderAttachment> outputAttachment;
     std::unique_ptr<SliderAttachment> tiltAttachment;
     std::unique_ptr<SliderAttachment> panAttachment;
+    std::unique_ptr<SliderAttachment> limThresholdAttachment;
 
     std::unique_ptr<ButtonAttachment> syncAttachment;
     std::unique_ptr<ButtonAttachment> midiAttachment;
@@ -233,6 +238,7 @@ private:
     std::unique_ptr<ComboBoxAttachment> modeInAttachment;
     std::unique_ptr<ComboBoxAttachment> modeOutAttachment;
     std::unique_ptr<ComboBoxAttachment> sumBusAttachment;
+    std::unique_ptr<ComboBoxAttachment> limModeAttachment;
 
     juce::ComponentBoundsConstrainer resizeConstrainer;
     std::unique_ptr<juce::ResizableCornerComponent> resizerCorner;
@@ -370,6 +376,11 @@ private:
     juce::String getFeedbackText() const;
     juce::String getFeedbackTextShort() const;
 
+    juce::String getCombText() const;
+    juce::String getCombTextShort() const;
+
+    void updateCombEnabled();
+
     juce::String getEngineText() const;
     juce::String getEngineTextShort() const;
 
@@ -431,6 +442,8 @@ private:
     juce::String cachedModTextShort;
     juce::String cachedFeedbackTextFull;
     juce::String cachedFeedbackTextShort;
+    juce::String cachedCombTextFull;
+    juce::String cachedCombTextShort;
     juce::String cachedEngineTextFull;
     juce::String cachedEngineTextShort;
     juce::String cachedStyleTextFull;
@@ -441,6 +454,10 @@ private:
     juce::String cachedPolarityTextShort;
     juce::String cachedMixTextFull;
     juce::String cachedMixTextShort;
+
+    juce::String cachedLimThresholdTextFull;
+    juce::String cachedLimThresholdTextShort;
+    juce::String cachedLimThresholdIntOnly;
 
     juce::String cachedInputTextFull;
     juce::String cachedInputTextShort;
@@ -457,6 +474,7 @@ private:
     juce::String cachedFreqIntOnly;
     juce::String cachedModIntOnly;
     juce::String cachedFeedbackIntOnly;
+    juce::String cachedCombIntOnly;
     juce::String cachedEngineIntOnly;
     juce::String cachedShapeIntOnly;
     juce::String cachedPolarityIntOnly;
@@ -475,9 +493,12 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 11> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 12> cachedValueAreas_;
     juce::Rectangle<int> cachedFilterValueArea_;
     juce::Rectangle<int> cachedPanValueArea_;
+    juce::Rectangle<int> cachedLimThresholdValueArea_;
+
+    static constexpr double kDefaultLimThreshold = 0.0;
 
     // IO collapsible section state
     juce::Rectangle<int> cachedToggleBarArea_;

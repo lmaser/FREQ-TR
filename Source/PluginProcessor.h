@@ -16,6 +16,7 @@ public:
 	static constexpr const char* kParamFreqSync   = "freq_sync";
 	static constexpr const char* kParamMod       = "mod";
 	static constexpr const char* kParamFeedback  = "feedback";
+	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamStyle     = "style";
 	static constexpr const char* kParamShape     = "shape";
@@ -46,6 +47,10 @@ public:
 	static constexpr const char* kParamModeIn        = "mode_in";
 	static constexpr const char* kParamModeOut       = "mode_out";
 	static constexpr const char* kParamSumBus        = "sum_bus";
+
+	// Limiter
+	static constexpr const char* kParamLimThreshold  = "lim_threshold";
+	static constexpr const char* kParamLimMode       = "lim_mode";
 
 	// Chaos
 	static constexpr const char* kParamChaos         = "chaos";
@@ -79,6 +84,13 @@ public:
 	static constexpr float kFeedbackMin     = 0.0f;
 	static constexpr float kFeedbackMax     = 1.0f;
 	static constexpr float kFeedbackDefault = 0.0f;
+
+	static constexpr float kCombMin     = 5.0f;
+	static constexpr float kCombMax     = 750.0f;
+	static constexpr float kCombDefault = 5.0f;
+
+	static constexpr int kHilbertOrder = 128;
+	static constexpr int kHilbertDelay = kHilbertOrder / 2;
 
 	static constexpr float kEngineMin     = 0.0f;
 	static constexpr float kEngineMax     = 1.0f;
@@ -138,6 +150,12 @@ public:
 	static constexpr int   kModeInOutDefault = 0;
 	static constexpr int   kSumBusDefault    = 0;
 	static constexpr float kSqrt2Over2       = 0.707106781f;
+
+	// Limiter ranges
+	static constexpr float kLimThresholdMin  = -36.0f;
+	static constexpr float kLimThresholdMax  =   0.0f;
+	static constexpr float kLimThresholdDefault = 0.0f;
+	static constexpr int   kLimModeDefault   = 0;
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -225,9 +243,8 @@ private:
 	// ── Hilbert transform (FIR, linear phase) ──
 	// 90° FIR + matched delay for real (0°) path.
 	// At 0 Hz shift the output equals the delayed input exactly.
-	static constexpr int kHilbertOrder = 128;          // FIR taps (even, power of 2)
-	static constexpr int kHilbertDelay = kHilbertOrder / 2;  // group delay in samples
 	std::vector<float> hilbertBufL, hilbertBufR;       // circular FIR input buffers
+	std::vector<float> cleanDelayBufL, cleanDelayBufR; // feedback-free delay for dry ref
 	int hilbertPos = 0;                                // write position in circular buffers
 
 	// Folded Hilbert taps: exploit antisymmetry + zero-skip (128 → ~32 MACs)
@@ -273,6 +290,13 @@ private:
 	static constexpr double kFeedbackSmoothingSeconds = 0.05;
 	float feedbackLastL = 0.0f;
 	float feedbackLastR = 0.0f;
+
+	// ── Feedback delay line (Comb-controlled resonant frequency) ──
+	static constexpr int kFbkDelayMaxSamples = 8192;
+	float fbkDelayBufL[kFbkDelayMaxSamples] = {};
+	float fbkDelayBufR[kFbkDelayMaxSamples] = {};
+	int   fbkDelayWritePos = 0;
+	float smoothedComb_ = 5.0f;
 
 	// ── Feedback DC blocker (one-pole HP ~5 Hz) ──
 	static constexpr float kFbkDcBlockHz = 5.0f;
@@ -321,6 +345,7 @@ private:
 	std::atomic<float>* freqParam    = nullptr;
 	std::atomic<float>* modParam     = nullptr;
 	std::atomic<float>* feedbackParam = nullptr;
+	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
 	std::atomic<float>* shapeParam   = nullptr;
@@ -352,6 +377,8 @@ private:
 	std::atomic<float>* modeInParam    = nullptr;
 	std::atomic<float>* modeOutParam   = nullptr;
 	std::atomic<float>* sumBusParam    = nullptr;
+	std::atomic<float>* limThresholdParam = nullptr;
+	std::atomic<float>* limModeParam     = nullptr;
 	float lastPan_      = -1.0f;
 	float lastPanLeft_  = 1.0f;
 	float lastPanRight_ = 1.0f;
@@ -533,6 +560,95 @@ private:
 		}
 
 		chaosDelayWritePos_ = (wp + 1) & mask;
+	}
+
+	// ── Dual-stage transparent peak limiter ──
+	static constexpr float kLimFloor = 1.0e-12f;
+	float limEnv1_[2] = { kLimFloor, kLimFloor };
+	float limEnv2_[2] = { kLimFloor, kLimFloor };
+	float limAtt1_  = 0.0f;
+	float limRel1_  = 0.0f;
+	float limRel2_  = 0.0f;
+
+	inline void applyLimiter (float* leftData, float* rightData, int numSamples,
+	                         float thresholdGain) noexcept
+	{
+		for (int i = 0; i < numSamples; ++i)
+		{
+			const float peakL = std::abs (leftData[i]);
+			const float peakR = std::abs (rightData[i]);
+
+			// Stage 1 — leveler (2 ms attack, 10 ms release)
+			for (int ch = 0; ch < 2; ++ch)
+			{
+				const float p = (ch == 0) ? peakL : peakR;
+				if (p > limEnv1_[ch])
+					limEnv1_[ch] = limAtt1_ * limEnv1_[ch] + (1.0f - limAtt1_) * p;
+				else
+					limEnv1_[ch] = limRel1_ * limEnv1_[ch] + (1.0f - limRel1_) * p;
+				if (limEnv1_[ch] < kLimFloor) limEnv1_[ch] = kLimFloor;
+			}
+
+			// Stage 2 — brickwall (instant attack, 100 ms release)
+			for (int ch = 0; ch < 2; ++ch)
+			{
+				const float p = (ch == 0) ? peakL : peakR;
+				if (p > limEnv2_[ch])
+					limEnv2_[ch] = p;
+				else
+					limEnv2_[ch] = limRel2_ * limEnv2_[ch] + (1.0f - limRel2_) * p;
+				if (limEnv2_[ch] < kLimFloor) limEnv2_[ch] = kLimFloor;
+			}
+
+			// Stereo-linked gain reduction
+			float gr = 1.0f;
+			const float maxEnv1 = juce::jmax (limEnv1_[0], limEnv1_[1]);
+			const float maxEnv2 = juce::jmax (limEnv2_[0], limEnv2_[1]);
+			if (maxEnv1 > thresholdGain)
+				gr = juce::jmin (gr, thresholdGain / maxEnv1);
+			if (maxEnv2 > thresholdGain)
+				gr = juce::jmin (gr, thresholdGain / maxEnv2);
+
+			leftData[i]  *= gr;
+			rightData[i] *= gr;
+		}
+	}
+
+	inline void applyLimiterSample (float& sampleL, float& sampleR, float thresholdGain) noexcept
+	{
+		const float peakL = std::abs (sampleL);
+		const float peakR = std::abs (sampleR);
+
+		for (int ch = 0; ch < 2; ++ch)
+		{
+			const float p = (ch == 0) ? peakL : peakR;
+			if (p > limEnv1_[ch])
+				limEnv1_[ch] = limAtt1_ * limEnv1_[ch] + (1.0f - limAtt1_) * p;
+			else
+				limEnv1_[ch] = limRel1_ * limEnv1_[ch] + (1.0f - limRel1_) * p;
+			if (limEnv1_[ch] < kLimFloor) limEnv1_[ch] = kLimFloor;
+		}
+
+		for (int ch = 0; ch < 2; ++ch)
+		{
+			const float p = (ch == 0) ? peakL : peakR;
+			if (p > limEnv2_[ch])
+				limEnv2_[ch] = p;
+			else
+				limEnv2_[ch] = limRel2_ * limEnv2_[ch] + (1.0f - limRel2_) * p;
+			if (limEnv2_[ch] < kLimFloor) limEnv2_[ch] = kLimFloor;
+		}
+
+		float gr = 1.0f;
+		const float maxEnv1 = juce::jmax (limEnv1_[0], limEnv1_[1]);
+		const float maxEnv2 = juce::jmax (limEnv2_[0], limEnv2_[1]);
+		if (maxEnv1 > thresholdGain)
+			gr = juce::jmin (gr, thresholdGain / maxEnv1);
+		if (maxEnv2 > thresholdGain)
+			gr = juce::jmin (gr, thresholdGain / maxEnv2);
+
+		sampleL *= gr;
+		sampleR *= gr;
 	}
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FREQTRAudioProcessor)

@@ -52,6 +52,10 @@ public:
 	static constexpr const char* kParamLimThreshold  = "lim_threshold";
 	static constexpr const char* kParamLimMode       = "lim_mode";
 
+	// Invert Polarity / Invert Stereo
+	static constexpr const char* kParamInvPol        = "inv_pol";
+	static constexpr const char* kParamInvStr        = "inv_str";
+
 	// Chaos
 	static constexpr const char* kParamChaos         = "chaos";
 	static constexpr const char* kParamChaosD        = "chaos_d";
@@ -156,6 +160,10 @@ public:
 	static constexpr float kLimThresholdMax  =   0.0f;
 	static constexpr float kLimThresholdDefault = 0.0f;
 	static constexpr int   kLimModeDefault   = 0;
+
+	// Invert Polarity / Invert Stereo defaults
+	static constexpr int   kInvPolDefault    = 0;   // 0=NONE  1=WET  2=GLOBAL
+	static constexpr int   kInvStrDefault    = 0;   // 0=NONE  1=WET  2=GLOBAL
 
 	static juce::String getMidiNoteName (int midiNote);
 	juce::String getCurrentFreqDisplay() const;
@@ -379,6 +387,8 @@ private:
 	std::atomic<float>* sumBusParam    = nullptr;
 	std::atomic<float>* limThresholdParam = nullptr;
 	std::atomic<float>* limModeParam     = nullptr;
+	std::atomic<float>* invPolParam      = nullptr;
+	std::atomic<float>* invStrParam      = nullptr;
 	float lastPan_      = -1.0f;
 	float lastPanLeft_  = 1.0f;
 	float lastPanRight_ = 1.0f;

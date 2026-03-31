@@ -716,6 +716,22 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         limModeCombo.setJustificationType (juce::Justification::centred);
         limModeCombo.setLookAndFeel (&lnf);
         limModeCombo.setVisible (false);
+
+        addAndMakeVisible (invPolCombo);
+        invPolCombo.addItem ("NONE",   1);
+        invPolCombo.addItem ("WET",    2);
+        invPolCombo.addItem ("GLOBAL", 3);
+        invPolCombo.setJustificationType (juce::Justification::centred);
+        invPolCombo.setLookAndFeel (&lnf);
+        invPolCombo.setVisible (false);
+
+        addAndMakeVisible (invStrCombo);
+        invStrCombo.addItem ("NONE",   1);
+        invStrCombo.addItem ("WET",    2);
+        invStrCombo.addItem ("GLOBAL", 3);
+        invStrCombo.setJustificationType (juce::Justification::centred);
+        invStrCombo.setLookAndFeel (&lnf);
+        invStrCombo.setVisible (false);
     }
 
     syncButton.setButtonText ("");
@@ -800,6 +816,8 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     modeOutAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamModeOut, modeOutCombo);
     sumBusAttachment  = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamSumBus,  sumBusCombo);
     limModeAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamLimMode, limModeCombo);
+    invPolAttachment  = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamInvPol,  invPolCombo);
+    invStrAttachment  = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, FREQTRAudioProcessor::kParamInvStr,  invStrCombo);
 
     for (auto* paramId : kUiMirrorParamIds)
         audioProcessor.apvts.addParameterListener (paramId, this);
@@ -861,6 +879,8 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     modeOutCombo.setLookAndFeel (nullptr);
     sumBusCombo.setLookAndFeel (nullptr);
     limModeCombo.setLookAndFeel (nullptr);
+    invPolCombo.setLookAndFeel (nullptr);
+    invStrCombo.setLookAndFeel (nullptr);
 
     setLookAndFeel (nullptr);
 }
@@ -878,6 +898,14 @@ void FREQTRAudioProcessorEditor::applyActivePalette()
     activeScheme = scheme;
     lnf.setScheme (activeScheme);
     filterBar_.setScheme (activeScheme);
+
+    for (auto* combo : { &modeInCombo, &modeOutCombo, &sumBusCombo, &limModeCombo, &invPolCombo, &invStrCombo })
+    {
+        combo->setColour (juce::ComboBox::backgroundColourId, scheme.bg);
+        combo->setColour (juce::ComboBox::textColourId,       scheme.text);
+        combo->setColour (juce::ComboBox::outlineColourId,    scheme.outline);
+        combo->setColour (juce::ComboBox::arrowColourId,      scheme.text);
+    }
 }
 
 void FREQTRAudioProcessorEditor::applyCrtState (bool enabled)
@@ -4252,8 +4280,8 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
 
     // Bars below toggle: 8 IO rows when expanded (IN, OUT, TILT, FILTER, PAN, MIX, LIM + MODE_ROW), 8 main bars when collapsed.
     // Toggle bar stays fixed — only bar/gap sizing adapts to the visible count.
-    const int numSliders = 8;
-    const int numGaps    = 8;  // (N-1) inter-slider + 1 toggle-to-first
+    const int numSliders = ioExpanded ? 9 : 8;
+    const int numGaps    = ioExpanded ? 9 : 8;  // (N-1) inter-slider + 1 toggle-to-first
 
     m.toggleBarH = 20;  // fixed visual height for click area
     const int spaceForScale = juce::jmax (40, m.availableForSliders - m.toggleBarH);
@@ -4747,10 +4775,13 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
                 const bool useShort = ga.getBoundingBox (0, -1, false).getWidth() > comboW;
                 g.drawText (useShort ? shortTxt : full, area, juce::Justification::centred);
             };
+            g.setColour (activeScheme.text);
             drawComboLabel (modeInCombo,  "MODE IN",  "IN");
             drawComboLabel (modeOutCombo, "MODE OUT", "OUT");
             drawComboLabel (sumBusCombo,  "SUM BUS",  "SUM");
             drawComboLabel (limModeCombo, "LIMIT",    "LIM");
+            drawComboLabel (invPolCombo,  "INV POL",  "POL");
+            drawComboLabel (invStrCombo,  "INV STR",  "STR");
         }
 
         if (chaosFilterButton.isVisible())
@@ -4851,6 +4882,11 @@ void FREQTRAudioProcessorEditor::resized()
             modeOutCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap),      modeY, comboW, comboH);
             sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGap) * 2,  modeY, comboW, comboH);
             limModeCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap) * 3,  modeY, comboW, comboH);
+
+            const int invY = modeY + comboH + comboGap;
+            const int invW = (totalW - comboGap) / 2;
+            invPolCombo.setBounds (horizontalLayout.leftX,                    invY, invW, comboH);
+            invStrCombo.setBounds (horizontalLayout.leftX + invW + comboGap,  invY, invW, comboH);
         }
 
         // Chaos buttons at chaosRowY
@@ -4868,6 +4904,8 @@ void FREQTRAudioProcessorEditor::resized()
         modeOutCombo.setVisible (true);
         sumBusCombo.setVisible (true);
         limModeCombo.setVisible (true);
+        invPolCombo.setVisible (true);
+        invStrCombo.setVisible (true);
         chaosFilterButton.setVisible (true);
         chaosFilterDisplay.setVisible (true);
         chaosDelayButton.setVisible (true);
@@ -4916,6 +4954,8 @@ void FREQTRAudioProcessorEditor::resized()
         modeOutCombo.setVisible (false);
         sumBusCombo.setVisible (false);
         limModeCombo.setVisible (false);
+        invPolCombo.setVisible (false);
+        invStrCombo.setVisible (false);
         inputSlider.setBounds (0, 0, 0, 0);
         outputSlider.setBounds (0, 0, 0, 0);
         tiltSlider.setBounds (0, 0, 0, 0);

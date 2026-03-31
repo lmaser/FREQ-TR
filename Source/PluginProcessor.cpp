@@ -212,6 +212,8 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	sumBusParam        = apvts.getRawParameterValue (kParamSumBus);
 	limThresholdParam  = apvts.getRawParameterValue (kParamLimThreshold);
 	limModeParam       = apvts.getRawParameterValue (kParamLimMode);
+	invPolParam         = apvts.getRawParameterValue (kParamInvPol);
+	invStrParam         = apvts.getRawParameterValue (kParamInvStr);
 	chaosParam         = apvts.getRawParameterValue (kParamChaos);
 	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
 	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
@@ -631,6 +633,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float limThreshLin = (limMode != 0)
 		? fastDecibelsToGain (loadAtomicOrDefault (limThresholdParam, kLimThresholdDefault))
 		: 1.0f;
+
+	const int invPol = loadIntParamOrDefault (invPolParam, kInvPolDefault);
+	const int invStr = loadIntParamOrDefault (invStrParam, kInvStrDefault);
 
 	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
 	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
@@ -1052,6 +1057,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		float wR = wetR * smoothedInputGain * smoothedOutputGain;
 		if (limMode == 1)
 			applyLimiterSample (wL, wR, limThreshLin);
+
+		// Invert Polarity / Stereo (WET mode: after Limiter WET)
+		if (invPol == 1) { wL = -wL; wR = -wR; }
+		if (invStr == 1 && numChannels >= 2) std::swap (wL, wR);
+
 		wL *= smoothedMix;
 		wR *= smoothedMix;
 		const float dL = dryRefL * (1.0f - smoothedMix);
@@ -1115,6 +1125,21 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	{
 		if (buffer.getNumChannels() >= 2)
 			applyLimiter (buffer.getWritePointer (0), buffer.getWritePointer (1), numSamples, limThreshLin);
+	}
+
+	// ── Invert Polarity / Stereo (GLOBAL mode: after Limiter GLOBAL, before safety clip) ──
+	{
+		const int nc = buffer.getNumChannels();
+		if (invPol == 2)
+			for (int ch = 0; ch < nc; ++ch)
+				juce::FloatVectorOperations::multiply (buffer.getWritePointer (ch), -1.0f, numSamples);
+		if (invStr == 2 && nc >= 2)
+		{
+			float* sL = buffer.getWritePointer (0);
+			float* sR = buffer.getWritePointer (1);
+			for (int n = 0; n < numSamples; ++n)
+				std::swap (sL[n], sR[n]);
+		}
 	}
 
 	// ── Safety limiter: +48 dBFS — only catches runaways ──
@@ -1291,6 +1316,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		juce::NormalisableRange<float> (kLimThresholdMin, kLimThresholdMax, 0.1f), kLimThresholdDefault));
 	params.push_back (std::make_unique<juce::AudioParameterChoice> (
 		kParamLimMode, "Lim Mode", juce::StringArray { "NONE", "WET", "GLOBAL" }, kLimModeDefault));
+
+	// Invert Polarity / Invert Stereo
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamInvPol, "Invert Polarity",
+		juce::StringArray { "NONE", "WET", "GLOBAL" }, kInvPolDefault));
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamInvStr, "Invert Stereo",
+		juce::StringArray { "NONE", "WET", "GLOBAL" }, kInvStrDefault));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

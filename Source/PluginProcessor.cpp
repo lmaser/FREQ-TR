@@ -214,6 +214,10 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	limModeParam       = apvts.getRawParameterValue (kParamLimMode);
 	invPolParam         = apvts.getRawParameterValue (kParamInvPol);
 	invStrParam         = apvts.getRawParameterValue (kParamInvStr);
+	mixModeParam        = apvts.getRawParameterValue (kParamMixMode);
+	dryLevelParam       = apvts.getRawParameterValue (kParamDryLevel);
+	wetLevelParam       = apvts.getRawParameterValue (kParamWetLevel);
+	filterPosParam      = apvts.getRawParameterValue (kParamFilterPos);
 	chaosParam         = apvts.getRawParameterValue (kParamChaos);
 	chaosDelayParam    = apvts.getRawParameterValue (kParamChaosD);
 	chaosAmtParam      = apvts.getRawParameterValue (kParamChaosAmt);
@@ -424,10 +428,21 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	// Reset chaos state
 	chaosFilterEnabled_ = false;
 	chaosDelayEnabled_  = false;
+	chaosStereo_ = false;
 	chaosAmtD_ = 0.0f; chaosAmtF_ = 0.0f;
-	chaosDPhase_ = 0.0f; chaosDTarget_ = 0.0f; chaosDSmoothed_ = 0.0f;
-	chaosGPhase_ = 0.0f; chaosGTarget_ = 0.0f; chaosGSmoothed_ = 0.0f;
-	chaosFPhase_ = 0.0f; chaosFTarget_ = 0.0f; chaosFSmoothed_ = 0.0f;
+	chaosAmtNormD_ = 0.0f;
+	for (int c = 0; c < 2; ++c)
+	{
+		chaosDPrev_[c] = 0.0f; chaosDCurr_[c] = 0.0f; chaosDNext_[c] = 0.0f;
+		chaosDPhase_[c] = 0.0f; chaosDDriftPhase_[c] = 0.0f; chaosDDriftFreqHz_[c] = 0.0f;
+		chaosDOut_[c] = 0.0f;
+		chaosGPrev_[c] = 0.0f; chaosGCurr_[c] = 0.0f; chaosGNext_[c] = 0.0f;
+		chaosGPhase_[c] = 0.0f; chaosGDriftPhase_[c] = 0.0f; chaosGDriftFreqHz_[c] = 0.0f;
+		chaosGOut_[c] = 0.0f;
+	}
+	chaosFPrev_ = 0.0f; chaosFCurr_ = 0.0f; chaosFNext_ = 0.0f;
+	chaosFPhase_ = 0.0f; chaosFDriftPhase_ = 0.0f; chaosFDriftFreqHz_ = 0.0f;
+	chaosFOut_[0] = chaosFOut_[1] = 0.0f;
 	smoothedChaosDelayMaxSamples_ = 0.0f;
 	smoothedChaosGainMaxDb_ = 0.0f;
 	smoothedChaosFilterMaxOct_ = 0.0f;
@@ -437,9 +452,6 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 	// Precompute sampleRate-dependent smooth coefficients
 	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
-	cachedChaosDSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.030f));
-	cachedChaosGSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.015f));
-	cachedChaosFSmoothCoeff_     = std::exp (-1.0f / ((float) currentSampleRate * 0.060f));
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 
 	// Limiter state reset
@@ -637,6 +649,17 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int invPol = loadIntParamOrDefault (invPolParam, kInvPolDefault);
 	const int invStr = loadIntParamOrDefault (invStrParam, kInvStrDefault);
 
+	const int mixMode = loadIntParamOrDefault (mixModeParam, kMixModeDefault);
+	const float dryLevel = loadAtomicOrDefault (dryLevelParam, kDryLevelDefault);
+	const float wetLevel = loadAtomicOrDefault (wetLevelParam, kWetLevelDefault);
+	// Filter / Tilt position
+	{
+		const int fltPos = loadIntParamOrDefault (filterPosParam, kFilterPosDefault);
+		// 0=F▼T▼  1=F▲T▲  2=F▲T▼  3=F▼T▲
+		filterPre_ = (fltPos == 1 || fltPos == 2);
+		tiltPre_   = (fltPos == 1 || fltPos == 3);
+	}
+
 	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
 	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
@@ -774,12 +797,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float rawAmtD = loadAtomicOrDefault (chaosAmtParam, kChaosAmtDefault);
 			const float rawSpdD = loadAtomicOrDefault (chaosSpdParam, kChaosSpdDefault);
 			chaosAmtD_       = rawAmtD;
+			chaosAmtNormD_   = rawAmtD * 0.01f;
 			chaosShPeriodD_  = (float) currentSampleRate / juce::jmax (0.01f, rawSpdD);
 			const float amtNormD = rawAmtD * 0.01f;
 			chaosDelayMaxSamples_ = amtNormD * 0.005f * (float) currentSampleRate;  // ±5ms at 100%
 			chaosGainMaxDb_       = amtNormD * 1.0f;                                // ±1dB at 100%
-			chaosDSmoothCoeff_ = cachedChaosDSmoothCoeff_;
-			chaosGSmoothCoeff_ = cachedChaosGSmoothCoeff_;
 		}
 		else
 		{
@@ -795,7 +817,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			chaosShPeriodF_  = (float) currentSampleRate / juce::jmax (0.01f, rawSpdF);
 			const float amtNormF = rawAmtF * 0.01f;
 			chaosFilterMaxOct_ = amtNormF * 2.0f;  // ±2 oct at 100%
-			chaosFSmoothCoeff_ = cachedChaosFSmoothCoeff_;
 		}
 		else
 		{
@@ -803,10 +824,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		chaosParamSmoothCoeff_ = cachedChaosParamSmoothCoeff_;
+		chaosStereo_ = (style >= 1);
 	}
 	else
 	{
 		chaosAmtD_ = 0.0f; chaosAmtF_ = 0.0f;
+		chaosAmtNormD_ = 0.0f;
 		chaosDelayMaxSamples_ = 0.0f;
 		chaosGainMaxDb_ = 0.0f;
 		chaosFilterMaxOct_ = 0.0f;
@@ -871,6 +894,111 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			% kFbkDelayMaxSamples;
 		const float fbSrcL = (style == 2) ? fbkDelayBufR[fbReadPos] : fbkDelayBufL[fbReadPos];
 		const float fbSrcR = (style == 2) ? fbkDelayBufL[fbReadPos] : fbkDelayBufR[fbReadPos];
+
+		// ── PRE wet filter (HP + LP) ── applied to input before effect
+		if (filterPre_ && (hpOn || lpOn))
+		{
+			smoothedFilterHpFreq_ = smoothedFilterHpFreq_ * kGainSmoothCoeff
+				+ targetHpFreq * (1.0f - kGainSmoothCoeff);
+			smoothedFilterLpFreq_ = smoothedFilterLpFreq_ * kGainSmoothCoeff
+				+ targetLpFreq * (1.0f - kGainSmoothCoeff);
+
+			--filterCoeffCountdown_;
+			if (filterCoeffCountdown_ <= 0)
+			{
+				filterCoeffCountdown_ = kFilterCoeffUpdateInterval;
+				if (chaosFilterEnabled_ && chaosAmtF_ > 0.01f)
+				{
+					const float sHp = smoothedFilterHpFreq_;
+					const float sLp = smoothedFilterLpFreq_;
+
+					// L channel coefficients
+					const float octL = chaosFOut_[0] * smoothedChaosFilterMaxOct_;
+					const float multL = std::exp2 (octL);
+					smoothedFilterHpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+						(hpOn ? sHp : kFilterFreqMin) * multL);
+					smoothedFilterLpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+						(lpOn ? sLp : kFilterFreqMax) * multL);
+					updateFilterCoeffs (true, true);
+
+					if (chaosStereo_)
+					{
+						// Save L coefficients, compute R with quadrature offset
+						auto hpL0 = hpCoeffs_[0]; auto hpL1 = hpCoeffs_[1];
+						auto lpL0 = lpCoeffs_[0]; auto lpL1 = lpCoeffs_[1];
+
+						const float octR = chaosFOut_[1] * smoothedChaosFilterMaxOct_;
+						const float multR = std::exp2 (octR);
+						smoothedFilterHpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+							(hpOn ? sHp : kFilterFreqMin) * multR);
+						smoothedFilterLpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+							(lpOn ? sLp : kFilterFreqMax) * multR);
+						updateFilterCoeffs (true, true);
+
+						hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+						lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
+						hpCoeffs_[0] = hpL0; hpCoeffs_[1] = hpL1;
+						lpCoeffs_[0] = lpL0; lpCoeffs_[1] = lpL1;
+					}
+					else
+					{
+						hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+						lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
+					}
+
+					smoothedFilterHpFreq_ = sHp;
+					smoothedFilterLpFreq_ = sLp;
+				}
+				else
+				{
+					updateFilterCoeffs (false, false);
+					hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+					lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
+				}
+			}
+
+			if (hpOn)
+			{
+				for (int s = 0; s < numSections_hp; ++s)
+				{
+					mInL = processWetBiquad (hpCoeffs_[s], wetFilterState_[0].hp[s], mInL);
+					mInR = processWetBiquad (hpCoeffsR_[s], wetFilterState_[1].hp[s], mInR);
+				}
+			}
+			if (lpOn)
+			{
+				for (int s = 0; s < numSections_lp; ++s)
+				{
+					mInL = processWetBiquad (lpCoeffs_[s], wetFilterState_[0].lp[s], mInL);
+					mInR = processWetBiquad (lpCoeffsR_[s], wetFilterState_[1].lp[s], mInR);
+				}
+			}
+		}
+
+		// ── Tilt EQ PRE (before effect) ──
+		if (tiltPre_)
+		{
+			smoothedTiltDb_ = paramCoeff * smoothedTiltDb_ + (1.0f - paramCoeff) * tiltTarget;
+			--tiltCoeffCountdown_;
+			if (tiltCoeffCountdown_ <= 0)
+			{
+				tiltCoeffCountdown_ = kTiltCoeffUpdateInterval;
+				if (std::abs (smoothedTiltDb_ - tiltDb_) > 0.01f)
+				{
+					tiltDb_ = smoothedTiltDb_;
+					computeTiltCoeffs (tiltDb_, 1000.0f, (float) currentSampleRate);
+				}
+			}
+			{
+				const float tL = tiltB0_ * mInL + tiltStateL_;
+				tiltStateL_ = tiltB1_ * mInL - tiltA1_ * tL;
+				mInL = tL;
+
+				const float tR = tiltB0_ * mInR + tiltStateR_;
+				tiltStateR_ = tiltB1_ * mInR - tiltA1_ * tR;
+				mInR = tR;
+			}
+		}
 
 		// Inject feedback pre-Hilbert (creative comb effect)
 		const float fbInL = mInL + effectiveFb * fbSrcL;
@@ -957,8 +1085,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (chaosDelayEnabled_) advanceChaosD();
 		if (chaosFilterEnabled_) advanceChaosF();
 
-		// ── Wet filter (HP + LP) ──
-		if (hpOn || lpOn)
+		// ── Wet filter (HP + LP) ── POST position
+		if (! filterPre_ && (hpOn || lpOn))
 		{
 			smoothedFilterHpFreq_ = smoothedFilterHpFreq_ * kGainSmoothCoeff
 				+ targetHpFreq * (1.0f - kGainSmoothCoeff);
@@ -971,21 +1099,50 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				filterCoeffCountdown_ = kFilterCoeffUpdateInterval;
 				if (chaosFilterEnabled_ && chaosAmtF_ > 0.01f)
 				{
-					const float oct = chaosFSmoothed_ * smoothedChaosFilterMaxOct_;
-					const float mult = std::exp2 (oct);
 					const float sHp = smoothedFilterHpFreq_;
 					const float sLp = smoothedFilterLpFreq_;
+
+					// L channel coefficients
+					const float octL = chaosFOut_[0] * smoothedChaosFilterMaxOct_;
+					const float multL = std::exp2 (octL);
 					smoothedFilterHpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
-						(hpOn ? sHp : kFilterFreqMin) * mult);
+						(hpOn ? sHp : kFilterFreqMin) * multL);
 					smoothedFilterLpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
-						(lpOn ? sLp : kFilterFreqMax) * mult);
+						(lpOn ? sLp : kFilterFreqMax) * multL);
 					updateFilterCoeffs (true, true);
+
+					if (chaosStereo_)
+					{
+						auto hpL0 = hpCoeffs_[0]; auto hpL1 = hpCoeffs_[1];
+						auto lpL0 = lpCoeffs_[0]; auto lpL1 = lpCoeffs_[1];
+
+						const float octR = chaosFOut_[1] * smoothedChaosFilterMaxOct_;
+						const float multR = std::exp2 (octR);
+						smoothedFilterHpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+							(hpOn ? sHp : kFilterFreqMin) * multR);
+						smoothedFilterLpFreq_ = juce::jlimit (kFilterFreqMin, kFilterFreqMax,
+							(lpOn ? sLp : kFilterFreqMax) * multR);
+						updateFilterCoeffs (true, true);
+
+						hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+						lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
+						hpCoeffs_[0] = hpL0; hpCoeffs_[1] = hpL1;
+						lpCoeffs_[0] = lpL0; lpCoeffs_[1] = lpL1;
+					}
+					else
+					{
+						hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+						lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
+					}
+
 					smoothedFilterHpFreq_ = sHp;
 					smoothedFilterLpFreq_ = sLp;
 				}
 				else
 				{
 					updateFilterCoeffs (false, false);
+					hpCoeffsR_[0] = hpCoeffs_[0]; hpCoeffsR_[1] = hpCoeffs_[1];
+					lpCoeffsR_[0] = lpCoeffs_[0]; lpCoeffsR_[1] = lpCoeffs_[1];
 				}
 			}
 
@@ -994,7 +1151,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				for (int s = 0; s < numSections_hp; ++s)
 				{
 					wetL = processWetBiquad (hpCoeffs_[s], wetFilterState_[0].hp[s], wetL);
-					wetR = processWetBiquad (hpCoeffs_[s], wetFilterState_[1].hp[s], wetR);
+					wetR = processWetBiquad (hpCoeffsR_[s], wetFilterState_[1].hp[s], wetR);
 				}
 			}
 			if (lpOn)
@@ -1002,41 +1159,40 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				for (int s = 0; s < numSections_lp; ++s)
 				{
 					wetL = processWetBiquad (lpCoeffs_[s], wetFilterState_[0].lp[s], wetL);
-					wetR = processWetBiquad (lpCoeffs_[s], wetFilterState_[1].lp[s], wetR);
+					wetR = processWetBiquad (lpCoeffsR_[s], wetFilterState_[1].lp[s], wetR);
 				}
 			}
 		}
 
-		// ── Tilt EQ (1st-order shelf, 1 kHz pivot) ──
-		smoothedTiltDb_ = paramCoeff * smoothedTiltDb_ + (1.0f - paramCoeff) * tiltTarget;
-		--tiltCoeffCountdown_;
-		if (tiltCoeffCountdown_ <= 0)
+		// ── Tilt EQ POST (after effect) ──
+		if (!tiltPre_)
 		{
-			tiltCoeffCountdown_ = kTiltCoeffUpdateInterval;
-			if (std::abs (smoothedTiltDb_ - tiltDb_) > 0.01f)
+			smoothedTiltDb_ = paramCoeff * smoothedTiltDb_ + (1.0f - paramCoeff) * tiltTarget;
+			--tiltCoeffCountdown_;
+			if (tiltCoeffCountdown_ <= 0)
 			{
-				tiltDb_ = smoothedTiltDb_;
-				computeTiltCoeffs (tiltDb_, 1000.0f, (float) currentSampleRate);
+				tiltCoeffCountdown_ = kTiltCoeffUpdateInterval;
+				if (std::abs (smoothedTiltDb_ - tiltDb_) > 0.01f)
+				{
+					tiltDb_ = smoothedTiltDb_;
+					computeTiltCoeffs (tiltDb_, 1000.0f, (float) currentSampleRate);
+				}
 			}
-		}
-		{
-			const float tL = tiltB0_ * wetL + tiltStateL_;
-			tiltStateL_ = tiltB1_ * wetL - tiltA1_ * tL;
-			wetL = tL;
+			{
+				const float tL = tiltB0_ * wetL + tiltStateL_;
+				tiltStateL_ = tiltB1_ * wetL - tiltA1_ * tL;
+				wetL = tL;
 
-			const float tR = tiltB0_ * wetR + tiltStateR_;
-			tiltStateR_ = tiltB1_ * wetR - tiltA1_ * tR;
-			wetR = tR;
+				const float tR = tiltB0_ * wetR + tiltStateR_;
+				tiltStateR_ = tiltB1_ * wetR - tiltA1_ * tR;
+				wetR = tR;
+			}
 		}
 
 		// ── Chaos D (micro-delay + gain modulation) ──
 		if (chaosDelayEnabled_)
 		{
 			applyChaosDelay (wetL, wetR);
-			const float gainDb  = chaosGSmoothed_ * smoothedChaosGainMaxDb_;
-			const float gainLin = std::exp2 (gainDb * 0.16609640474f);  // log2(10)/20
-			wetL *= gainLin;
-			wetR *= gainLin;
 		}
 
 		// Mode Out: M/S encode wet output
@@ -1062,10 +1218,23 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (invPol == 1) { wL = -wL; wR = -wR; }
 		if (invStr == 1 && numChannels >= 2) std::swap (wL, wR);
 
-		wL *= smoothedMix;
-		wR *= smoothedMix;
-		const float dL = dryRefL * (1.0f - smoothedMix);
-		const float dR = dryRefR * (1.0f - smoothedMix);
+		float dL, dR;
+		if (mixMode == 1) // SEND: independent dry/wet levels
+		{
+			const float dryGainTarget = dryLevel;
+			const float wetGainTarget = wetLevel;
+			wL *= wetGainTarget;
+			wR *= wetGainTarget;
+			dL = dryRefL * dryGainTarget;
+			dR = dryRefR * dryGainTarget;
+		}
+		else // INSERT: crossfade
+		{
+			wL *= smoothedMix;
+			wR *= smoothedMix;
+			dL = dryRefL * (1.0f - smoothedMix);
+			dR = dryRefR * (1.0f - smoothedMix);
+		}
 
 		float outL, outR;
 		if (sumBusVal == 0) // ST: normal stereo
@@ -1324,6 +1493,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterChoice> (
 		kParamInvStr, "Invert Stereo",
 		juce::StringArray { "NONE", "WET", "GLOBAL" }, kInvStrDefault));
+
+	// Mix Mode / Dry-Wet Levels / Filter Position
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamMixMode, "Mix Mode",
+		juce::StringArray { "INSERT", "SEND" }, kMixModeDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamDryLevel, "Dry Level", 0.0f, 1.0f, kDryLevelDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamWetLevel, "Wet Level", 0.0f, 1.0f, kWetLevelDefault));
+	// Filter / Tilt position (PRE / POST effect)
+	params.push_back (std::make_unique<juce::AudioParameterChoice> (
+		kParamFilterPos, "Filter Position",
+		juce::StringArray { juce::String::fromUTF8 (u8"F\u25bc T\u25bc"),
+		                    juce::String::fromUTF8 (u8"F\u25b2 T\u25b2"),
+		                    juce::String::fromUTF8 (u8"F\u25b2 T\u25bc"),
+		                    juce::String::fromUTF8 (u8"F\u25bc T\u25b2") },
+		kFilterPosDefault));
 
 	// UI state (hidden from automation)
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));

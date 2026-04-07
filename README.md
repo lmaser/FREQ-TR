@@ -187,9 +187,9 @@ Micro-variation engine that adds organic randomness to the effect. Two independe
 Each chaos target has its own toggle and shares two global controls:
 
 - **AMOUNT (0–100%)**: Modulation depth — how far from the base value the parameter can drift. Default: 50%.
-- **SPEED (0.01–100 Hz)**: Sample-and-hold rate — how often a new random target is picked. Default: 5 Hz.
+- **SPEED (0.01–100 Hz)**: Random target rate — how often a new random value is generated. Default: 5 Hz.
 
-Uses exponential smoothing between random targets for glitch-free transitions.
+Uses Hermite cubic interpolation (Catmull-Rom) between random targets with a per-channel quadrature drift LFO for organic, stereo-decorrelated movement.
 
 ### LIM THRESHOLD (−36 to 0 dB)
 
@@ -245,10 +245,10 @@ Stereo-linked gain reduction ensures consistent imaging.
 - Waveform SHAPE now affects the frequency shifter engine — non-sinusoidal waveforms produce rich harmonic shifts via shaped quadrature oscillators.
 - RMS-based waveform normalization eliminates volume jumps when morphing between shapes (sine RMS as reference).
 - Added TILT EQ (−6 to +6 dB) — first-order spectral tilt on the wet signal.
-- Added CHAOS engine with two independent targets: CHAOS F (filter modulation) and CHAOS D (frequency modulation). Sample-and-hold with exponential smoothing.
+- Added CHAOS engine with two independent targets: CHAOS F (filter modulation) and CHAOS D (frequency modulation). Hermite cubic interpolation with quadrature drift LFO.
 - Negative feedback via POLARITY parameter — inverted carrier direction allows downward shifts and alternate modulation character.
 - Added safety hard-limiter at +48 dBFS on output, catching NaN/Inf runaways without engaging during normal operation.
-- Sine LUT (4096 entries) replaces real-time `std::sin` calls for oscillator and chaos engines.
+- Sine LUT (4096 entries) replaces real-time `std::sin` calls for the oscillator engine.
 - Tilt EQ coefficients cached with 32-sample update interval, reducing per-sample `std::exp` overhead.
 - Numeric entry popup for percentage sliders: precision standardized to 1 decimal place.
 - Ported `drawToggleButton` with automatic text-shrinking from CAB-TR for consistent toggle rendering.

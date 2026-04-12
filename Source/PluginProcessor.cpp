@@ -36,45 +36,7 @@ namespace
 	}
 
 	// ── Waveform generation (normalised phase 0..1 → output -1..1) ──
-	inline float waveSine (float phase) noexcept
-	{
-		return std::sin (phase * juce::MathConstants<float>::twoPi);
-	}
 
-	inline float waveTriangle (float phase) noexcept
-	{
-		return 4.0f * std::abs (phase - 0.5f) - 1.0f;
-	}
-
-	inline float waveSquare (float phase) noexcept
-	{
-		return phase < 0.5f ? 1.0f : -1.0f;
-	}
-
-	inline float waveSaw (float phase) noexcept
-	{
-		return 2.0f * phase - 1.0f;
-	}
-
-	// Morph between 4 waveforms via shape parameter (0..1)
-	// 0 = Sine, 0.333 = Triangle, 0.666 = Square, 1.0 = Saw
-	inline float morphedWave (float phase, float shape) noexcept
-	{
-		const float scaled = shape * 3.0f;
-		const int segment = juce::jlimit (0, 2, (int) scaled);
-		const float frac = scaled - (float) segment;
-
-		float a, b;
-		switch (segment)
-		{
-			case 0:  a = waveSine (phase);     b = waveTriangle (phase); break;
-			case 1:  a = waveTriangle (phase); b = waveSquare (phase);   break;
-			case 2:  a = waveSquare (phase);   b = waveSaw (phase);      break;
-			default: a = waveSine (phase);     b = waveSine (phase);     break;
-		}
-
-		return a + frac * (b - a);
-	}
 
 	// ── Hilbert FIR coefficient generation ──
 	// Windowed-sinc design: h[n] = (2 / (n*pi)) * sin^2(n*pi/2)  for odd n, 0 for even
@@ -188,7 +150,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	combParam     = apvts.getRawParameterValue (kParamComb);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
-	shapeParam   = apvts.getRawParameterValue (kParamShape);
+	harmParam    = apvts.getRawParameterValue (kParamHarm);
 	polarityParam = apvts.getRawParameterValue (kParamPolarity);
 	mixParam     = apvts.getRawParameterValue (kParamMix);
 	inputParam   = apvts.getRawParameterValue (kParamInput);
@@ -237,7 +199,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	uiEditorWidth.store (w, std::memory_order_relaxed);
 	uiEditorHeight.store (h, std::memory_order_relaxed);
 
-	buildShapeGainTable();
+	buildHarmTables();
 	buildSineLut();
 }
 
@@ -247,45 +209,88 @@ void FREQTRAudioProcessor::buildSineLut() noexcept
 		sineLut_[i] = std::sin ((float) i / (float) kSineLutSize * juce::MathConstants<float>::twoPi);
 }
 
-void FREQTRAudioProcessor::buildShapeGainTable()
+void FREQTRAudioProcessor::buildHarmTables()
 {
-	constexpr int kPhaseSteps = 4096;
-	// Target RMS = sine RMS = 1/sqrt(2) for consistent perceived loudness
-	constexpr double kTargetRms = 0.70710678118;   // 1 / sqrt(2)
+	constexpr float kTargetRms = 0.70710678118f; // sine RMS
 
-	for (int i = 0; i <= kShapeTableSize; ++i)
+	for (int i = 0; i < kMaxHarmonics; ++i)
+		harmonicWeights_[(size_t) i] = 1.0f / std::pow ((float) (i + 1), kHarmWeightExponent);
+
+	for (int i = 0; i <= kHarmTableSize; ++i)
 	{
-		const float shape = (float) i / (float) kShapeTableSize;
-		double sumSq = 0.0;
+		const float normCount = (float) i / (float) kHarmTableSize;
+		const float harmonicCount = 1.0f + normCount * (float) (kMaxHarmonics - 1);
+		const int wholeCount = juce::jlimit (1, kMaxHarmonics, (int) std::floor (harmonicCount));
+		const float frac = harmonicCount - (float) wholeCount;
 
-		for (int j = 0; j < kPhaseSteps; ++j)
+		float sumSq = 0.0f;
+		for (int h = 0; h < wholeCount; ++h)
 		{
-			const float phase = (float) j / (float) kPhaseSteps;
-			const double val = (double) morphedWave (phase, shape);
-			sumSq += val * val;
+			const float weight = harmonicWeights_[(size_t) h];
+			sumSq += weight * weight;
 		}
 
-		const double rms = std::sqrt (sumSq / (double) kPhaseSteps);
-		shapeGainTable[(size_t) i] = (rms > 0.001) ? (float) (kTargetRms / rms) : 1.0f;
+		if (wholeCount < kMaxHarmonics && frac > 0.0f)
+		{
+			const float nextWeight = harmonicWeights_[(size_t) wholeCount] * frac;
+			sumSq += nextWeight * nextWeight;
+		}
+
+		const float rms = std::sqrt (0.5f * sumSq);
+		harmGainTable[(size_t) i] = (rms > 0.0001f) ? (kTargetRms / rms) : 1.0f;
 	}
 }
 
-float FREQTRAudioProcessor::fastMorphedWave (float phase, float shape) const noexcept
+float FREQTRAudioProcessor::getEffectiveHarmonicCount (float harmNorm, float fundamentalHz) const noexcept
 {
-	const float scaled = shape * 3.0f;
-	const int segment = juce::jlimit (0, 2, (int) scaled);
-	const float frac = scaled - (float) segment;
+	const float requestedCount = 1.0f + juce::jlimit (0.0f, 1.0f, harmNorm) * (float) (kMaxHarmonics - 1);
+	const float absFundamentalHz = std::abs (fundamentalHz);
 
-	float a, b;
-	switch (segment)
+	if (absFundamentalHz <= 0.001f || currentSampleRate <= 0.0)
+		return requestedCount;
+
+	const int nyquistLimitedCount = juce::jlimit (
+		1, kMaxHarmonics,
+		(int) std::floor ((0.45 * currentSampleRate) / juce::jmax (absFundamentalHz, 1.0f)));
+
+	return juce::jlimit (1.0f, (float) nyquistLimitedCount, requestedCount);
+}
+
+float FREQTRAudioProcessor::getHarmGainForCount (float harmonicCount) const noexcept
+{
+	const float clampedCount = juce::jlimit (1.0f, (float) kMaxHarmonics, harmonicCount);
+	const float tablePos = (clampedCount - 1.0f) / (float) (kMaxHarmonics - 1) * (float) kHarmTableSize;
+	const int i0 = juce::jlimit (0, kHarmTableSize - 1, (int) tablePos);
+	const int i1 = juce::jmin (i0 + 1, kHarmTableSize);
+	const float frac = tablePos - (float) i0;
+	return harmGainTable[(size_t) i0] + frac * (harmGainTable[(size_t) i1] - harmGainTable[(size_t) i0]);
+}
+
+FREQTRAudioProcessor::HarmonicOscPair FREQTRAudioProcessor::fastHarmonicOscPair (float phase, float harmonicCount) const noexcept
+{
+	HarmonicOscPair pair;
+
+	const float clampedCount = juce::jlimit (1.0f, (float) kMaxHarmonics, harmonicCount);
+	const int wholeCount = juce::jlimit (1, kMaxHarmonics, (int) std::floor (clampedCount));
+	const float frac = clampedCount - (float) wholeCount;
+
+	for (int h = 0; h < wholeCount; ++h)
 	{
-		case 0:  a = fastSin (phase);      b = waveTriangle (phase); break;
-		case 1:  a = waveTriangle (phase);  b = waveSquare (phase);   break;
-		case 2:  a = waveSquare (phase);    b = waveSaw (phase);      break;
-		default: a = fastSin (phase);      b = fastSin (phase);      break;
+		const float harmonicPhase = phase * (float) (h + 1);
+		const float weight = harmonicWeights_[(size_t) h];
+		pair.sine += weight * fastSin (harmonicPhase);
+		pair.cosine += weight * fastCos (harmonicPhase);
 	}
 
-	return a + frac * (b - a);
+	if (wholeCount < kMaxHarmonics && frac > 0.0f)
+	{
+		const float harmonicPhase = phase * (float) (wholeCount + 1);
+		const float weight = harmonicWeights_[(size_t) wholeCount] * frac;
+		pair.sine += weight * fastSin (harmonicPhase);
+		pair.cosine += weight * fastCos (harmonicPhase);
+	}
+
+	return pair;
 }
 
 FREQTRAudioProcessor::~FREQTRAudioProcessor()
@@ -366,7 +371,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	oscPhaseR = 0.0;
 	smoothedFreq = 0.0f;
 	smoothedEngine = 0.0f;
-	smoothedShape = 0.0f;
+	smoothedHarm = 0.0f;
 	smoothedMix = 1.0f;
 	smoothedDryLevel = loadAtomicOrDefault (dryLevelParam, kDryLevelDefault);
 	smoothedWetLevel = loadAtomicOrDefault (wetLevelParam, kWetLevelDefault);
@@ -636,7 +641,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz) - kHilbertDelay);
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
-	const float shape  = loadAtomicOrDefault (shapeParam, kShapeDefault);
+	const float harm   = loadAtomicOrDefault (harmParam, kHarmDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
 	const float inputDb  = loadAtomicOrDefault (inputParam, kInputDefault);
@@ -759,7 +764,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		freqCoeff = std::exp (-1.0f / ((float) currentSampleRate * tau));
 	}
 
-	// EMA coefficient for mix/engine/shape (~5 ms)
+	// EMA coefficient for mix/engine/harm (~5 ms)
 	const float paramCoeff = cachedFreqEmaCoeff_;
 
 	feedbackSmoothed.setTargetValue (targetFeedback);
@@ -849,7 +854,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
 		smoothedEngine = paramCoeff * smoothedEngine + (1.0f - paramCoeff) * engine;
-		smoothedShape  = paramCoeff * smoothedShape  + (1.0f - paramCoeff) * shape;
+		smoothedHarm   = paramCoeff * smoothedHarm   + (1.0f - paramCoeff) * harm;
 		smoothedMix    = paramCoeff * smoothedMix    + (1.0f - paramCoeff) * mix;
 		smoothedDryLevel = paramCoeff * smoothedDryLevel + (1.0f - paramCoeff) * dryLevel;
 		smoothedWetLevel = paramCoeff * smoothedWetLevel + (1.0f - paramCoeff) * wetLevel;
@@ -1034,19 +1039,19 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float realL = hilbertBufL[(size_t) delayIdx];
 		const float realR = hilbertBufR[(size_t) delayIdx];
 
-		// RMS-normalization factor for current smoothed shape
-		const float curShapeIdx = smoothedShape * (float) kShapeTableSize;
-		const int csi0 = juce::jlimit (0, kShapeTableSize - 1, (int) curShapeIdx);
-		const int csi1 = juce::jmin (csi0 + 1, kShapeTableSize);
-		const float csiFrac = curShapeIdx - (float) csi0;
-		const float curShapeGain = shapeGainTable[(size_t) csi0]
-							  + csiFrac * (shapeGainTable[(size_t) csi1] - shapeGainTable[(size_t) csi0]);
+		// Harmonic density and quadrature oscillator pair
+		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, smoothedFreq);
+		const float harmonicCountR = getEffectiveHarmonicCount (smoothedHarm, smoothedFreq * rFreqRatio);
+		const float harmGainL = getHarmGainForCount (harmonicCountL);
+		const float harmGainR = getHarmGainForCount (harmonicCountR);
+		const auto harmPairL = fastHarmonicOscPair ((float) oscPhase, harmonicCountL);
+		const auto harmPairR = fastHarmonicOscPair ((float) oscPhaseR, harmonicCountR);
 
-		// ── Oscillator: morphed waveforms (RMS-normalized, LUT-accelerated) ──
-		const float oscWave     = fastMorphedWave ((float) oscPhase,          smoothedShape) * curShapeGain;
-		const float oscWaveCos  = fastMorphedWave ((float) oscPhase  + 0.25f, smoothedShape) * curShapeGain;
-		const float oscWaveR    = fastMorphedWave ((float) oscPhaseR,         smoothedShape) * curShapeGain;
-		const float oscWaveCosR = fastMorphedWave ((float) oscPhaseR + 0.25f, smoothedShape) * curShapeGain;
+		// Harmonic oscillator pair (RMS-normalized, LUT-accelerated)
+		const float oscWave     = harmPairL.sine   * harmGainL;
+		const float oscWaveCos  = harmPairL.cosine * harmGainL;
+		const float oscWaveR    = harmPairR.sine   * harmGainR;
+		const float oscWaveCosR = harmPairR.cosine * harmGainR;
 
 		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
@@ -1389,10 +1394,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kParamStyle, "Style",
 		juce::NormalisableRange<float> ((float) kStyleMin, (float) kStyleMax, 1.0f, 1.0f), kStyleDefault));
 
-	// Shape: 0 = Sine, ~0.33 = Tri, ~0.66 = Square, 1 = Saw
+	// HARM: 0 = sine only, 100% = densest harmonic stack allowed by Nyquist (capped at 24 partials)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
-		kParamShape, "Shape",
-		juce::NormalisableRange<float> (kShapeMin, kShapeMax, 0.0f, 1.0f), kShapeDefault));
+		kParamHarm, "Harm",
+		juce::NormalisableRange<float> (kHarmMin, kHarmMax, 0.0f, 1.0f), kHarmDefault));
 
 	// Polarity: -1 to +1 (flips freq sign / AM wave polarity)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (

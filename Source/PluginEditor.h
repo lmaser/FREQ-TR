@@ -95,7 +95,7 @@ private:
                 return juce::String (rounded1, 1);
             }
 
-            if (owner != nullptr && this == &owner->engineSlider)
+            if (owner != nullptr && (this == &owner->engineSlider || this == &owner->harmSlider))
             {
                 double percent = v * 100.0;
                 return juce::String (percent, 1);
@@ -120,7 +120,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 14 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, SHAPE, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
+    // 14 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
@@ -129,7 +129,7 @@ private:
     BarSlider feedbackSlider;
     BarSlider combSlider;
     BarSlider engineSlider;
-    BarSlider shapeSlider;
+    BarSlider harmSlider;
     BarSlider polaritySlider;
     BarSlider styleSlider;
     BarSlider tiltSlider;
@@ -267,7 +267,7 @@ private:
     std::unique_ptr<SliderAttachment> combAttachment;
     std::unique_ptr<SliderAttachment> engineAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
-    std::unique_ptr<SliderAttachment> shapeAttachment;
+    std::unique_ptr<SliderAttachment> harmAttachment;
     std::unique_ptr<SliderAttachment> polarityAttachment;
     std::unique_ptr<SliderAttachment> mixAttachment;
     std::unique_ptr<SliderAttachment> inputAttachment;
@@ -439,8 +439,8 @@ private:
     juce::String getStyleText() const;
     juce::String getStyleTextShort() const;
 
-    juce::String getShapeText() const;
-    juce::String getShapeTextShort() const;
+    juce::String getHarmText() const;
+    juce::String getHarmTextShort() const;
 
     juce::String getPolarityText() const;
     juce::String getPolarityTextShort() const;
@@ -500,8 +500,8 @@ private:
     juce::String cachedEngineTextShort;
     juce::String cachedStyleTextFull;
     juce::String cachedStyleTextShort;
-    juce::String cachedShapeTextFull;
-    juce::String cachedShapeTextShort;
+    juce::String cachedHarmTextFull;
+    juce::String cachedHarmTextShort;
     juce::String cachedPolarityTextFull;
     juce::String cachedPolarityTextShort;
     juce::String cachedMixTextFull;
@@ -528,7 +528,7 @@ private:
     juce::String cachedFeedbackIntOnly;
     juce::String cachedCombIntOnly;
     juce::String cachedEngineIntOnly;
-    juce::String cachedShapeIntOnly;
+    juce::String cachedHarmIntOnly;
     juce::String cachedPolarityIntOnly;
     juce::String cachedStyleIntOnly;
 

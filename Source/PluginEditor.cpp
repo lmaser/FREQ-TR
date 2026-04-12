@@ -698,7 +698,7 @@ void FREQTRAudioProcessorEditor::DualMixBarComponent::mouseMove (const juce::Mou
 FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    const std::array<BarSlider*, 14> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 14> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
 
     useCustomPalette = audioProcessor.getUiUseCustomPalette();
     crtEnabled = audioProcessor.getUiCrtEnabled();
@@ -753,7 +753,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     combSlider.setNumDecimalPlacesToDisplay (2);
     engineSlider.setNumDecimalPlacesToDisplay (1);
     styleSlider.setNumDecimalPlacesToDisplay (0);
-    shapeSlider.setNumDecimalPlacesToDisplay (2);
+    harmSlider.setNumDecimalPlacesToDisplay (1);
     polaritySlider.setNumDecimalPlacesToDisplay (2);
     mixSlider.setNumDecimalPlacesToDisplay (1);
     inputSlider.setNumDecimalPlacesToDisplay (1);
@@ -925,7 +925,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindSlider (combAttachment,    FREQTRAudioProcessor::kParamComb,    combSlider,    (double) FREQTRAudioProcessor::kCombDefault);
     bindSlider (engineAttachment,  FREQTRAudioProcessor::kParamEngine,  engineSlider,  (double) FREQTRAudioProcessor::kEngineDefault);
     bindSlider (styleAttachment,   FREQTRAudioProcessor::kParamStyle,   styleSlider,   (double) FREQTRAudioProcessor::kStyleDefault);
-    bindSlider (shapeAttachment,   FREQTRAudioProcessor::kParamShape,   shapeSlider,   (double) FREQTRAudioProcessor::kShapeDefault);
+    bindSlider (harmAttachment,    FREQTRAudioProcessor::kParamHarm,    harmSlider,    (double) FREQTRAudioProcessor::kHarmDefault);
     bindSlider (polarityAttachment, FREQTRAudioProcessor::kParamPolarity, polaritySlider, kDefaultPolarity);
     bindSlider (mixAttachment,      FREQTRAudioProcessor::kParamMix,     mixSlider,     (double) FREQTRAudioProcessor::kMixDefault);
     bindSlider (inputAttachment,    FREQTRAudioProcessor::kParamInput,   inputSlider,   (double) FREQTRAudioProcessor::kInputDefault);
@@ -1013,7 +1013,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     dismissEditorOwnedModalPrompts (lnf);
     setPromptOverlayActive (false);
 
-    const std::array<BarSlider*, 14> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 14> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
     for (auto* slider : barSliders)
         slider->removeListener (this);
 
@@ -1077,7 +1077,7 @@ void FREQTRAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
     {
         return s == &freqSlider || s == &modSlider || s == &feedbackSlider || s == &combSlider
             || s == &engineSlider
-            || s == &styleSlider || s == &shapeSlider || s == &polaritySlider || s == &mixSlider
+        || s == &styleSlider || s == &harmSlider || s == &polaritySlider || s == &mixSlider
             || s == &inputSlider || s == &outputSlider;
     };
 
@@ -1116,7 +1116,7 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
     const bool enableControls = ! shouldBeActive;
     const std::array<juce::Component*, 13> interactiveControls {
         &inputSlider, &outputSlider, &mixSlider,
-        &freqSlider, &modSlider, &engineSlider, &shapeSlider,
+        &freqSlider, &modSlider, &engineSlider, &harmSlider,
         &polaritySlider, &styleSlider,
         &syncButton, &midiButton, &alignButton, &pdcButton
     };
@@ -1235,7 +1235,7 @@ void FREQTRAudioProcessorEditor::timerCallback()
                                     || feedbackSlider.isMouseButtonDown()
                                     || engineSlider.isMouseButtonDown()
                                     || styleSlider.isMouseButtonDown()
-                                    || shapeSlider.isMouseButtonDown()
+        || harmSlider.isMouseButtonDown()
                                     || polaritySlider.isMouseButtonDown()
                                     || mixSlider.isMouseButtonDown()
                                     || inputSlider.isMouseButtonDown()
@@ -1482,41 +1482,16 @@ juce::String FREQTRAudioProcessorEditor::getStyleTextShort() const
     return "DUAL";
 }
 
-juce::String FREQTRAudioProcessorEditor::getShapeText() const
+juce::String FREQTRAudioProcessorEditor::getHarmText() const
 {
-    const float val = (float) shapeSlider.getValue();
-    const float scaled = val * 3.0f;
-
-    const char* names[]      = { "SINE", "TRI", "SQR", "SAW" };
-    const int seg = juce::jlimit (0, 2, (int) scaled);
-    const float frac = scaled - (float) seg;
-    const int pct = juce::roundToInt (frac * 100.0f);
-
-    if (pct <= 1)
-        return juce::String (names[seg]) + " SHAPE";
-    if (pct >= 99)
-        return juce::String (names[seg + 1]) + " SHAPE";
-
-    return juce::String (names[seg]) + "|" + names[seg + 1] + " " + juce::String (pct) + "% SHAPE";
+    const int pct = juce::roundToInt ((float) harmSlider.getValue() * 100.0f);
+    return juce::String (pct) + "% HARM";
 }
 
-juce::String FREQTRAudioProcessorEditor::getShapeTextShort() const
+juce::String FREQTRAudioProcessorEditor::getHarmTextShort() const
 {
-    const float val = (float) shapeSlider.getValue();
-    const float scaled = val * 3.0f;
-
-    const char* full[]  = { "SINE", "TRI", "SQR", "SAW" };
-    const char* abbr[]  = { "SIN", "TRI", "SQR", "SAW" };
-    const int seg = juce::jlimit (0, 2, (int) scaled);
-    const float frac = scaled - (float) seg;
-    const int pct = juce::roundToInt (frac * 100.0f);
-
-    if (pct <= 1)
-        return full[seg];
-    if (pct >= 99)
-        return full[seg + 1];
-
-    return juce::String (abbr[seg]) + "|" + abbr[seg + 1] + " " + juce::String (pct) + "%";
+    const int pct = juce::roundToInt ((float) harmSlider.getValue() * 100.0f);
+    return juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getPolarityText() const
@@ -1663,8 +1638,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     const auto oldEngineShort  = cachedEngineTextShort;
     const auto oldStyleFull    = cachedStyleTextFull;
     const auto oldStyleShort   = cachedStyleTextShort;
-    const auto oldShapeFull    = cachedShapeTextFull;
-    const auto oldShapeShort   = cachedShapeTextShort;
+    const auto oldHarmFull     = cachedHarmTextFull;
+    const auto oldHarmShort    = cachedHarmTextShort;
     const auto oldPolarityFull = cachedPolarityTextFull;
     const auto oldPolarityShort = cachedPolarityTextShort;
     const auto oldMixFull      = cachedMixTextFull;
@@ -1692,8 +1667,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     cachedEngineTextShort   = getEngineTextShort();
     cachedStyleTextFull     = getStyleText();
     cachedStyleTextShort    = getStyleTextShort();
-    cachedShapeTextFull     = getShapeText();
-    cachedShapeTextShort    = getShapeTextShort();
+    cachedHarmTextFull      = getHarmText();
+    cachedHarmTextShort     = getHarmTextShort();
     cachedPolarityTextFull  = getPolarityText();
     cachedPolarityTextShort = getPolarityTextShort();
     cachedMixTextFull       = getMixText();
@@ -1759,7 +1734,7 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
             cachedCombIntOnly = juce::String (chz, 1) + "Hz";
     }
     cachedEngineIntOnly   = juce::String ((int) std::lround (engineSlider.getValue() * 100.0)) + "%";
-    cachedShapeIntOnly    = getShapeTextShort();
+    cachedHarmIntOnly     = getHarmTextShort();
     cachedPolarityIntOnly = juce::String (polaritySlider.getValue(), 1);
     cachedStyleIntOnly    = juce::String ((int) styleSlider.getValue());
 
@@ -1797,8 +1772,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         || oldEngineShort   != cachedEngineTextShort
         || oldStyleFull     != cachedStyleTextFull
         || oldStyleShort    != cachedStyleTextShort
-        || oldShapeFull     != cachedShapeTextFull
-        || oldShapeShort    != cachedShapeTextShort
+        || oldHarmFull      != cachedHarmTextFull
+        || oldHarmShort     != cachedHarmTextShort
         || oldPolarityFull  != cachedPolarityTextFull
         || oldPolarityShort != cachedPolarityTextShort
         || oldMixFull       != cachedMixTextFull
@@ -2249,7 +2224,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &combSlider)      { suffix = " HZ";         suffixShort = " HZ"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " %"; }
     else if (&s == &styleSlider)     { suffix = " STYLE";      suffixShort = " STYLE"; }
-    else if (&s == &shapeSlider)     { suffix = " SHAPE";      suffixShort = " SHP"; }
+    else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " %"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
     else if (&s == &mixSlider)       { suffix = " % MIX";      suffixShort = " % MIX"; }
     else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " %"; }
@@ -2257,7 +2232,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &outputSlider)    { suffix = " DB OUTPUT";  suffixShort = " DB OUT"; }
     const juce::String suffixText = suffix.trimStart();
     const juce::String suffixTextShort = suffixShort.trimStart();
-    const bool isPercentPrompt = (&s == &engineSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &panSlider);
+    const bool isPercentPrompt = (&s == &engineSlider || &s == &harmSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &panSlider);
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
@@ -2334,8 +2309,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             worstCaseText = "100";
         else if (&s == &styleSlider)
             worstCaseText = "1";
-        else if (&s == &shapeSlider)
-            worstCaseText = "1.00";
+        else if (&s == &harmSlider)
+            worstCaseText = "100.0";
         else if (&s == &polaritySlider)
             worstCaseText = "-1.00";
         else if (&s == &mixSlider)
@@ -2466,12 +2441,12 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             maxDecs = 0;
             maxLen = 1;
         }
-        else if (&s == &shapeSlider)
+        else if (&s == &harmSlider)
         {
             minVal = 0.0;
-            maxVal = 1.0;
-            maxDecs = 2;
-            maxLen = 4;
+            maxVal = 100.0;
+            maxDecs = 1;
+            maxLen = 5;
         }
         else if (&s == &polaritySlider)
         {
@@ -2651,6 +2626,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
 
                 // Percent → 0..1 for engine, mix and feedback
                 if (safeThis != nullptr && (sliderPtr == &safeThis->engineSlider
+                                         || sliderPtr == &safeThis->harmSlider
                                          || sliderPtr == &safeThis->mixSlider
                                          || sliderPtr == &safeThis->feedbackSlider
                                          || sliderPtr == &safeThis->panSlider))
@@ -4829,7 +4805,7 @@ void FREQTRAudioProcessorEditor::updateCachedLayout()
 
     const juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                                &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider,
-                                               &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider };
+        &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
     {
@@ -4935,7 +4911,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "750.00 Hz COMB",
         "FREQ SHIFT ENGINE",
         "STEREO STYLE", "DUAL STYLE",
-        "SQR SHAPE",
+        "100% HARM",
         "-1.00 POLARITY",
         "100% MIX",
         "-100.0 dB INPUT",
@@ -4965,7 +4941,7 @@ juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Poin
 {
     juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                          &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider,
-                                         &shapeSlider, &polaritySlider, &styleSlider, &tiltSlider };
+        &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
@@ -5182,10 +5158,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
     {
         const juce::String* fullTexts[kNumBars]  = { &cachedInputTextFull, &cachedOutputTextFull, &cachedMixTextFull,
                                                       &cachedFreqTextFull, &cachedModTextFull, &cachedFeedbackTextFull, &cachedCombTextFull, &cachedEngineTextFull,
-                                                      &cachedShapeTextFull, &cachedPolarityTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
+        &cachedHarmTextFull, &cachedPolarityTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
         const juce::String* shortTexts[kNumBars] = { &cachedInputTextShort, &cachedOutputTextShort, &cachedMixTextShort,
                                                       &cachedFreqTextShort, &cachedModTextShort, &cachedFeedbackTextShort, &cachedCombTextShort, &cachedEngineTextShort,
-                                                      &cachedShapeTextShort, &cachedPolarityTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
+        &cachedHarmTextShort, &cachedPolarityTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
         const juce::String* intTexts[kNumBars] = {
             &cachedInputIntOnly,
             &cachedOutputIntOnly,
@@ -5195,7 +5171,7 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             &cachedFeedbackIntOnly,
             &cachedCombIntOnly,
             &cachedEngineIntOnly,
-            &cachedShapeIntOnly,
+        &cachedHarmIntOnly,
             &cachedPolarityIntOnly,
             &cachedStyleIntOnly,
             &cachedTiltIntOnly
@@ -5462,7 +5438,7 @@ void FREQTRAudioProcessorEditor::resized()
         feedbackSlider.setBounds (0, 0, 0, 0);
         combSlider.setBounds (0, 0, 0, 0);
         engineSlider.setBounds (0, 0, 0, 0);
-        shapeSlider.setBounds (0, 0, 0, 0);
+    harmSlider.setBounds (0, 0, 0, 0);
         polaritySlider.setBounds (0, 0, 0, 0);
         styleSlider.setBounds (0, 0, 0, 0);
 
@@ -5471,7 +5447,7 @@ void FREQTRAudioProcessorEditor::resized()
         feedbackSlider.setVisible (false);
         combSlider.setVisible (false);
         engineSlider.setVisible (false);
-        shapeSlider.setVisible (false);
+    harmSlider.setVisible (false);
         polaritySlider.setVisible (false);
         styleSlider.setVisible (false);
     }
@@ -5519,7 +5495,7 @@ void FREQTRAudioProcessorEditor::resized()
         feedbackSlider.setVisible (true);
         combSlider.setVisible (true);
         engineSlider.setVisible (true);
-        shapeSlider.setVisible (true);
+    harmSlider.setVisible (true);
         polaritySlider.setVisible (true);
         styleSlider.setVisible (true);
 
@@ -5528,7 +5504,7 @@ void FREQTRAudioProcessorEditor::resized()
         feedbackSlider.setBounds (horizontalLayout.leftX, mainTop + 2 * step, horizontalLayout.barW, verticalLayout.barH);
         combSlider.setBounds     (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
         engineSlider.setBounds   (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
-        shapeSlider.setBounds    (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
+    harmSlider.setBounds     (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
         polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
         styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 7 * step, horizontalLayout.barW, verticalLayout.barH);
     }

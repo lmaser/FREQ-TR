@@ -19,7 +19,7 @@ public:
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamStyle     = "style";
-	static constexpr const char* kParamShape     = "shape";
+	static constexpr const char* kParamHarm      = "harm";
 	static constexpr const char* kParamPolarity  = "polarity";
 	static constexpr const char* kParamMix       = "mix";
 	static constexpr const char* kParamInput     = "input";
@@ -110,9 +110,9 @@ public:
 	static constexpr int kStyleMax     = 3;         // 0 = MONO, 1 = STEREO, 2 = WIDE, 3 = DUAL
 	static constexpr float kStyleDefault = 1.0f;
 
-	static constexpr float kShapeMin     = 0.0f;
-	static constexpr float kShapeMax     = 1.0f;
-	static constexpr float kShapeDefault = 0.0f;    // 0=Sine, 0.33=Tri, 0.66=Square, 1=Saw
+	static constexpr float kHarmMin     = 0.0f;
+	static constexpr float kHarmMax     = 1.0f;
+	static constexpr float kHarmDefault = 0.0f;    // 0 = sine only, 1 = up to 24 harmonics
 
 	static constexpr float kPolarityMin     = -1.0f;
 	static constexpr float kPolarityMax     =  1.0f;
@@ -271,10 +271,13 @@ private:
 	struct HilbertTap { int offset; float coeff; };
 	std::vector<HilbertTap> hilbertFoldedTaps;
 
-	// ── Shape peak-normalization table ──
-	static constexpr int kShapeTableSize = 256;
-	std::array<float, kShapeTableSize + 1> shapeGainTable {};
-	void buildShapeGainTable();
+	// ── Harmonics normalization / weighting ──
+	static constexpr int kMaxHarmonics = 24;
+	static constexpr int kHarmTableSize = 256;
+	static constexpr float kHarmWeightExponent = 1.2f;
+	std::array<float, kHarmTableSize + 1> harmGainTable {};
+	std::array<float, kMaxHarmonics> harmonicWeights_ {};
+	void buildHarmTables();
 
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
@@ -296,11 +299,19 @@ private:
 		return fastSin (phase01 + 0.25f);
 	}
 
-	float fastMorphedWave (float phase, float shape) const noexcept;
+	struct HarmonicOscPair
+	{
+		float sine = 0.0f;
+		float cosine = 0.0f;
+	};
+
+	float getEffectiveHarmonicCount (float harmNorm, float fundamentalHz) const noexcept;
+	float getHarmGainForCount (float harmonicCount) const noexcept;
+	HarmonicOscPair fastHarmonicOscPair (float phase, float harmonicCount) const noexcept;
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
-	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
+	float smoothedHarm = 0.0f;     // EMA-smoothed harmonic density
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 	float smoothedDryLevel = kDryLevelDefault;
 	float smoothedWetLevel = kWetLevelDefault;
@@ -376,7 +387,7 @@ private:
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
-	std::atomic<float>* shapeParam   = nullptr;
+	std::atomic<float>* harmParam    = nullptr;
 	std::atomic<float>* polarityParam = nullptr;
 	std::atomic<float>* mixParam     = nullptr;
 	std::atomic<float>* inputParam   = nullptr;

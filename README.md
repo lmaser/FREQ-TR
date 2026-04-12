@@ -6,252 +6,268 @@
 
 <br/><br/>
 
-FREQ-TR is a frequency shifter and amplitude modulator built for spectral manipulation, inharmonic textures, and tonal effects.  
-It combines an FIR Hilbert-transform frequency shifter with a ring/AM modulator, MIDI-controlled pitch, tempo-synced rates, and a minimal CRT-inspired interface.
+FREQ-TR is a frequency shifter and amplitude modulator built for spectral manipulation, inharmonic textures, and creative tonal movement.
+It combines an FIR Hilbert-transform frequency shifter with an AM/ring-mod engine, MIDI note control, tempo-synced rates, feedback, filtering, tilt, limiter stages, and a compact CRT-inspired interface.
 
 ## Concept
 
-FREQ-TR shifts audio frequencies by a fixed amount in hertz — not a ratio. Unlike pitch shifting, frequency shifting moves every partial by the same offset, breaking harmonic relationships and producing metallic, bell-like, or alien timbres.
+FREQ-TR shifts audio by a fixed amount in hertz, not by ratio. Unlike pitch shifting, frequency shifting moves every partial by the same offset, breaking harmonic relationships and producing metallic, bell-like, or alien timbres.
 
-The ENGINE control blends between pure amplitude modulation (AM) and full frequency shifting. At 0% (AM), the carrier simply multiplies the input — producing tremolo at low rates and ring modulation at audio rates. At 100% (Freq Shift), the Hilbert transform removes the mirror image, producing a clean single-sideband shift.
+The ENGINE control blends between pure amplitude modulation (AM) and full frequency shifting:
+- 0% = AM / ring-mod style multiplication
+- 100% = single-sideband frequency shift via FIR Hilbert transform
+- in between = continuous blend between both behaviors
 
-POLARITY flips the sign of the shift frequency (allowing downward shifts) and inverts the AM carrier wave, enabling both upper and lower sideband selection.
+POLARITY changes the sign of the shift frequency and the AM carrier direction, so the plugin can move upward, downward, or collapse to zero effect around the center.
 
 ## Interface
 
-FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visible at once — no pages, tabs, or hidden menus.
+FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visible in one main view, with the I/O section foldable from the top bar.
 
-- **Bar sliders**: Click and drag horizontally. Right-click for numeric entry (except STYLE, which is slider-only).
-- **Toggle buttons**: SYNC, MIDI, ALIGN, PDC. Click to enable/disable.
-- **Collapsible INPUT/OUTPUT/MIX section**: Click the toggle bar (triangle) at the top of the slider area to swap between main parameters and the INPUT, OUTPUT, MIX controls. The toggle bar stays fixed in place; only the arrow direction changes. State persists across sessions and preset changes.
-- **Filter bar**: Visible in the INPUT/OUTPUT/MIX section. Click to open the HP/LP filter configuration prompt with frequency, slope, and enable/disable controls for each filter.
-- **Gear icon** (top-right): Opens the info popup with version, credits, and a link to Graphics settings.
-- **Graphics popup**: Toggle CRT post-processing effect and switch between default/custom colour palettes.
-- **Resize**: Drag the bottom-right corner. Size persists across sessions.
+- Bar sliders: drag horizontally, or right-click for numeric entry where available.
+- Toggle buttons: `SYNC`, `MIDI`, `ALIGN`, `PDC`, `CHAOS F`, `CHAOS D`.
+- Collapsible I/O section: click the top triangle bar to switch between the main modulation view and the I/O/filter/routing section.
+- Filter bar: opens the HP/LP prompt.
+- Gear icon: opens the info popup and graphics settings.
+- Resize: bottom-right corner; size persists across sessions.
 
-The value column to the right of each slider shows the current state in context:
-- FREQ shows hertz (or MIDI note name when active, or sync division name).
-- MOD shows the frequency multiplier.
-- FEEDBACK shows percentage.
-- ENGINE shows AM/FREQ SHIFT blend percentage.
-- STYLE shows MONO/STEREO/WIDE/DUAL.
-- SHAPE shows the oscillator waveform name.
-- POLARITY shows the current value (−1 to +1).
-- MIX shows percentage.
-- INPUT/OUTPUT show dB values.
+The value column reflects the current context:
+- `FREQ`: hertz, note name, or sync division
+- `MOD`: frequency multiplier
+- `FEEDBACK`: percent
+- `COMB`: hertz
+- `ENGINE`: percent blend
+- `STYLE`: MONO / STEREO / WIDE / DUAL
+- `HARM`: percent harmonic density
+- `POLARITY`: -1 to +1
+- `MIX`: percent or SEND dry/wet state
+- `INPUT` / `OUTPUT`: dB
+- `TILT`: dB
+- `PAN`: stereo position
+- `LIMIT`: threshold in dB
 
 ## Parameters
 
-### INPUT (−100 to 0 dB)
+### INPUT (-100 to 0 dB)
 
-Pre-processing gain. Controls how much signal enters the frequency shifter / AM engine.  
-Applied to the wet signal only — the dry signal is unaffected.
+Pre-effect wet gain. This affects only the wet path, not the dry reference.
 
-### OUTPUT (−100 to +24 dB)
+### OUTPUT (-100 to +24 dB)
 
-Post-processing gain. Applied to the wet signal only.
+Post-effect wet gain.
 
-### MIX (0–100%)
+### MIX (0-100%)
 
-Dry/wet balance. 0% = fully dry, 100% = fully wet.
+Dry/wet balance in INSERT mode.
 
-### HP/LP FILTER
+### MIX MODE
 
-High-pass and low-pass filters applied to the wet signal, accessible via the filter bar in the IO section.
+- `INSERT`: standard crossfade between dry and wet
+- `SEND`: independent dry and wet gain control via the dual mix bar
 
-- **HP FREQ (20–20 000 Hz)**: High-pass cutoff frequency.
-- **LP FREQ (20–20 000 Hz)**: Low-pass cutoff frequency.
-- **HP SLOPE (6 dB / 12 dB / 24 dB)**: High-pass filter slope.
-- **LP SLOPE (6 dB / 12 dB / 24 dB)**: Low-pass filter slope.
-- **HP / LP toggles**: Enable or disable each filter independently. Click the HP/LP label or its checkbox to toggle.
+### DRY / WET (SEND mode)
 
-Slope modes:
-- **6 dB/oct**: Single-pole filter.
-- **12 dB/oct**: Second-order Butterworth.
-- **24 dB/oct**: Two cascaded second-order Butterworth stages.
+Independent send-style levels used only when `MIX MODE = SEND`.
 
-### FREQ (0–5,000 Hz)
+### FREQ (0-5000 Hz)
 
-Shift frequency. At 0 Hz the output equals the input. Higher values produce increasingly inharmonic results.  
-The slider uses a skewed scale (0.35) so low frequencies have finer resolution.
+Shift/modulation frequency. At 0 Hz the wet result collapses to the aligned input reference.
 
-When MIDI is active, FREQ shows the note name. When the note releases, the frequency glides back to the manual knob value.
+When MIDI is active, the effective frequency follows the incoming note. When SYNC is active, the effective frequency follows the selected DAW subdivision.
 
-### FREQ SYNC (30 divisions)
+### FREQ SYNC
 
-When SYNC is enabled, FREQ locks to DAW tempo. Provides 30 musical subdivisions:  
-1/64 through 8/1, each with triplet, normal, and dotted variants.  
-The sync value is converted to hertz via `1000 / durationMs`.
+30 tempo divisions, covering triplet / straight / dotted variants from fast divisions to long musical values.
 
-### MOD (×0.25–×4.0)
+### MOD
 
-Frequency multiplier applied to the shift frequency.  
-0% = ×0.25 (4× lower frequency), 50% = ×1.0 (no change), 100% = ×4.0 (4× higher frequency).
+Frequency multiplier applied to the effective frequency:
+- 0% = x0.25
+- 50% = x1.0
+- 100% = x4.0
 
-### FEEDBACK (0–100%)
+### FEEDBACK (0-100%)
 
-Feeds the wet output back into the Hilbert transform input. The feedback amount follows a smoothstep curve (3x²−2x³) for natural-feeling control response.
+Feeds the wet output back into the Hilbert input. This creates barberpole-like stacks in frequency-shift mode and increasingly metallic recirculation in AM mode.
 
-- **Freq Shift mode**: Creates cascading barberpole effects — each feedback iteration shifts the signal further, producing stacked inharmonic partials.
-- **AM mode**: Produces increasingly metallic and inharmonic textures as the ring-modulated signal is re-modulated on each pass.
+The feedback path includes:
+- smoothed control response
+- a comb-tuned delay line
+- DC blocking
+- feedback low-pass conditioning
+- safety limiting
 
-The Hilbert FIR's 64-sample group delay (~1.5 ms at 44.1 kHz) acts as the natural feedback delay, keeping the loop tight and responsive.
+### COMB (5-750 Hz)
 
-The feedback path includes a one-pole DC blocker at ~5 Hz and a safety limiter at ±4.0. The effective maximum feedback is capped at 97% internally to compensate for the Hilbert FIR's passband ripple, ensuring stable sustain without divergence.
+Resonant frequency of the feedback delay line. Higher values shorten the feedback delay and raise the comb resonance.
 
-### COMB (5–750 Hz)
+### ENGINE (0-100%)
 
-Resonant frequency of the feedback delay line. Controls the delay length in the feedback path, producing comb-filter resonances at the set frequency and its harmonics.
-
-Only active when FEEDBACK > 0. At the default value (5 Hz) the delay is long enough to be inaudible as a pitch — raising COMB shortens the delay and tunes the resonance upward.
-
-The slider uses a logarithmic scale for fine control at low frequencies. The display shows the current frequency in Hz.
-
-### ENGINE (0–100%)
-
-Blend between amplitude modulation and frequency shifting.  
-- **0% (AM)**: Ring/amplitude modulation. The oscillator multiplies the input directly.
-- **100% (Freq Shift)**: Single-sideband frequency shifting via FIR Hilbert transform.
-- **In between**: Crossfade between both processes.
+Blend between AM and frequency shift:
+- 0% = AM
+- 100% = FREQ SHIFT
 
 ### STYLE
 
-Routing topology:
-- **MONO**: Single processing path, summed to both channels.
-- **STEREO**: Independent left/right processing with shared oscillator.
-- **WIDE**: Opposite sidebands per channel (L = upper sideband, R = lower sideband) with cross-feedback. Acts as a dimension expander: the shift affects mainly the side signal (L−R) while leaving the mid (L+R) relatively intact. In AM mode, the right channel uses an inverted carrier for the same mid/side effect.
-- **DUAL**: R channel shifts at half (×0.5) the L shift frequency, with independent per-channel feedback. Two separate frequency-shifted textures, one per channel.
+- `MONO`: one processing path, duplicated to both channels
+- `STEREO`: stereo input, shared modulation rate
+- `WIDE`: opposite sidebands per channel for width enhancement
+- `DUAL`: right channel runs at half the left modulation rate
 
-### SHAPE (0–100%)
+### HARM (0-100%)
 
-Oscillator waveform morphing through four shapes:
-- **0%**: Sine
-- **33%**: Triangle
-- **66%**: Square
-- **100%**: Sawtooth
+Controls harmonic density of the modulator.
 
-Intermediate positions crossfade between adjacent waveforms. The display shows the blend, e.g. `TRI/SQR 50%`.
+- 0% = pure sine modulator
+- higher values = progressively denser additive harmonic series
+- internal cap = 24 partials maximum
+- effective count is also limited dynamically by Nyquist
 
-### POLARITY (−1 to +1)
+This affects both AM and frequency-shift behavior. At low values the modulation is cleaner and more fundamental-driven; at high values it becomes richer and more spectrally dense.
 
-Controls the direction of both the frequency shift and the AM carrier.  
-- **+1** (default): Upward frequency shift / normal AM polarity.
-- **−1**: Downward frequency shift / inverted AM polarity.
-- **0**: No shift (mutes the effect).
+### POLARITY (-1 to +1)
 
-Applied as a continuous multiplier on the shift frequency.
+Continuous multiplier applied to shift direction and AM carrier polarity.
 
-### MIX (0–100%)
-
-Dry/wet balance. 0% = fully dry, 100% = fully wet.
+- +1 = normal upward / positive behavior
+- -1 = inverted / downward behavior
+- 0 = no effective shift
 
 ### SYNC
 
-Locks shift frequency to DAW tempo divisions. Disabled when MIDI is active (MIDI takes priority).
+Locks the effective frequency to DAW tempo divisions.
 
 ### RETRIG
 
-Phase anchor for sync mode. When enabled (right-click on SYNC), the oscillator phase locks to the DAW transport position, so the modulation waveform restarts at each musical boundary. Hover over SYNC to see the current state (RETRIG: ON/OFF).
+Available from the SYNC prompt. Locks oscillator phase to musical position so synced modulation restarts deterministically against transport.
 
 ### MIDI
 
-Enables MIDI note control of shift frequency. Incoming notes set frequency to `440 × 2^((note − 69) / 12)` Hz.
+Enables MIDI note control of the modulation frequency using standard A440 tuning.
 
-**Velocity → Glide**: Note velocity controls the portamento speed between pitch changes.
-- vel 127 → instant transition.
-- vel 1 → full glide (~200 ms).
+Velocity also affects glide speed:
+- high velocity = near-instant pitch transition
+- low velocity = longer glide
 
-**MIDI Channel**: Click the channel display to select channel 1–16, or OMNI (all channels).
+### ALIGN
 
-### ALIGN (default: ON)
+Delays the dry reference to match the Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
 
-Phase alignment between dry and wet signals. When ON, the dry signal is delayed by 64 samples to match the Hilbert FIR group delay, so dry and wet are phase-coherent. When OFF, the dry signal is undelayed, producing comb-filtering at intermediate MIX values (a creative effect used by some frequency shifter plugins).
+### PDC
 
-### PDC (default: ON)
+Reports plugin latency to the host when enabled.
 
-Plugin Delay Compensation. When ON, reports 64 samples of latency to the DAW, allowing automatic delay compensation across tracks. When OFF, no latency is reported (useful if manual compensation is preferred or to reduce DAW latency overhead).
+### HP / LP FILTER
 
-### TILT (−6 to +6 dB)
+Wet-path filters, configurable from the filter prompt:
+- HP frequency
+- LP frequency
+- HP slope: 6 / 12 / 24 dB per octave
+- LP slope: 6 / 12 / 24 dB per octave
+- independent enable switches
 
-Spectral tilt applied to the wet signal. A first-order symmetric shelf filter pivoted at 1 kHz.  
-Positive values boost highs and cut lows; negative values cut highs and boost lows.  
-Useful for reshaping the tonal balance of the frequency-shifted or AM-processed signal.
+### FILTER POS
+
+Defines whether the wet HP/LP filter block happens before or after the core modulation path.
+
+### TILT (-6 to +6 dB)
+
+Spectral tilt on the wet path, pivoted around 1 kHz.
+
+### PAN
+
+Stereo pan applied after the wet/dry sum routing stage.
+
+### MODE IN
+
+Input routing mode:
+- `L+R`
+- `MID`
+- `SIDE`
+
+### MODE OUT
+
+Wet output routing mode:
+- `L+R`
+- `MID`
+- `SIDE`
+
+### SUM BUS
+
+How the wet path is summed into the output:
+- `ST`
+- `->M`
+- `->S`
 
 ### CHAOS
 
-Micro-variation engine that adds organic randomness to the effect. Two independent chaos targets:
+Two optional modulation targets:
 
-- **CHAOS F (Filter)**: Modulates the HP/LP filter cutoff frequencies when filters are enabled. Creates evolving tonal movement.
-- **CHAOS D (Frequency)**: Modulates the shift frequency. Produces drifting, detuned textures.
+- `CHAOS F`: filter cutoff drift
+- `CHAOS D`: frequency drift / micro-delay style modulation
 
-Each chaos target has its own toggle and shares two global controls:
+Each target uses its own amount and speed values and is smoothed/interpolated for organic motion.
 
-- **AMOUNT (0–100%)**: Modulation depth — how far from the base value the parameter can drift. Default: 50%.
-- **SPEED (0.01–100 Hz)**: Random target rate — how often a new random value is generated. Default: 5 Hz.
+### LIMIT
 
-Uses Hermite cubic interpolation (Catmull-Rom) between random targets with a per-channel quadrature drift LFO for organic, stereo-decorrelated movement.
+Limiter threshold:
+- range: -36 to 0 dB
 
-### LIM THRESHOLD (−36 to 0 dB)
+Limiter mode:
+- `NONE`
+- `WET`
+- `GLOBAL`
 
-Peak limiter threshold. Sets the ceiling above which the limiter engages.
-At 0 dB (default) the limiter acts as a transparent safety net. Lower values compress the signal harder.
+The limiter is a stereo-linked transparent 2-stage design:
+- Stage 1: 2 ms attack / 10 ms release
+- Stage 2: instant attack / 100 ms release
 
-### LIM MODE
+### INV POL / INV STR
 
-Limiter insertion point:
-- **NONE**: Limiter disabled.
-- **WET**: Limiter applied to the wet signal only (after processing, before dry/wet mix).
-- **GLOBAL**: Limiter applied to the final output (after output gain and dry/wet mix).
-
-The limiter is a dual-stage transparent peak limiter:
-- **Stage 1 (Leveler)**: 2 ms attack, 10 ms release — catches sustained overs.
-- **Stage 2 (Brickwall)**: Instant attack, 100 ms release — catches transient peaks.
-
-Stereo-linked gain reduction ensures consistent imaging.
+Independent post-processing inversion controls for polarity and stereo swap, with wet/global modes.
 
 ## Technical Details
 
 ### DSP Architecture
-- **Hilbert Transform**: 128-tap FIR filter with Blackman windowing. Antisymmetric tap folding reduces 128 MACs to ~32 per channel per sample.
-- **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix (when ALIGN is ON).
-- **Oscillator**: Band-limited morphing waveform (sine → triangle → square → sawtooth) with per-sample phase accumulation.
-- **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, mix, send dry/wet levels, input/output gain, pan, limiter threshold, tilt, and filter cutoffs. Feedback uses its own dedicated linear smoother.
-- **Wet filter**: Biquad HP/LP on the wet signal. Transposed Direct Form II. Coefficients updated once per block (channel 0), shared across channels.
 
-### MIDI Implementation
-- Standard A440 tuning: `frequency = 440 × 2^((note − 69) / 12)`.
-- Monophonic last-note priority. Note-off falls back to manual FREQ knob.
-- Channel filtering: OMNI (0) or specific channel (1–16).
-- Priority: MIDI > SYNC > Manual FREQ.
+- Hilbert transform: 128-tap FIR with Blackman windowing
+- Real path: matched delay for correct single-sideband reconstruction
+- Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
+- Harmonic cap: 24 partials max, dynamically limited by Nyquist
+- Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
+- Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
+- Feedback: comb-tuned delay line with DC blocking and low-pass conditioning
+- Safety: final hard safety clip at very high level only
 
-### State Persistence
-- All parameters saved via JUCE AudioProcessorValueTreeState.
-- UI state (size, palette, CRT toggle, MIDI channel, IO section expanded/collapsed) persisted in the plugin state.
-- Parameter IDs are stable across versions for preset compatibility.
+### MIDI
 
-### Performance
-- Zero-allocation audio thread. All buffers pre-allocated in `prepareToPlay`.
-- Lock-free atomic parameter reads (`std::memory_order_relaxed`).
-- FIR convolution uses antisymmetric folding (128 taps → ~32 multiply-accumulate ops per channel).
+- monophonic last-note priority
+- OMNI or channel-specific operation
+- note frequency follows standard `440 * 2^((note - 69) / 12)`
+- priority order: MIDI > SYNC > manual FREQ
+
+### State / Compatibility
+
+- Parameters and UI state persist through APVTS
+- The current implementation uses `HARM` instead of the legacy `SHAPE` control
+- Older sessions or automation that depended on `SHAPE` will not map that control 1:1
 
 ### Build
-- JUCE Framework, C++17, VST3 format.
-- Visual Studio 2022 (MSBuild, x64 Release).
-- Dependencies: JUCE modules only (no third-party libraries).
+
+- JUCE
+- C++17
+- VST3
+- Visual Studio 2022 / x64 Release
 
 ## Changelog
 
 ### v1.4
-- Waveform SHAPE now affects the frequency shifter engine — non-sinusoidal waveforms produce rich harmonic shifts via shaped quadrature oscillators.
-- RMS-based waveform normalization eliminates volume jumps when morphing between shapes (sine RMS as reference).
-- Added TILT EQ (−6 to +6 dB) — first-order spectral tilt on the wet signal.
-- Added CHAOS engine with two independent targets: CHAOS F (filter modulation) and CHAOS D (frequency modulation). Hermite cubic interpolation with quadrature drift LFO.
-- Negative feedback via POLARITY parameter — inverted carrier direction allows downward shifts and alternate modulation character.
-- Added safety hard-limiter at +48 dBFS on output, catching NaN/Inf runaways without engaging during normal operation.
-- Sine LUT (4096 entries) replaces real-time `std::sin` calls for the oscillator engine.
-- Tilt EQ coefficients cached with 32-sample update interval, reducing per-sample `std::exp` overhead.
-- Numeric entry popup for percentage sliders: precision standardized to 1 decimal place.
-- Ported `drawToggleButton` with automatic text-shrinking from CAB-TR for consistent toggle rendering.
-- Fixed checkbox sizing and tick-box rendering to match TR-series style.
-- Added COMB parameter (5–750 Hz) — tunes the feedback delay line resonant frequency, producing controllable comb-filter harmonics when FEEDBACK > 0.
-- Added dual-stage transparent peak limiter with LIM THRESHOLD (−36 to 0 dB) and LIM MODE (NONE/WET/GLOBAL). Stereo-linked gain reduction with 2 ms/10 ms leveler + instant/100 ms brickwall stages.
+
+- Replaced `SHAPE` with `HARM`
+- Harmonic modulator now starts from pure sine and adds density continuously up to 24 partials
+- Added RMS-normalized harmonic oscillator behavior
+- Added TILT EQ
+- Added CHAOS F / CHAOS D
+- Added limiter with `WET` / `GLOBAL` modes
+- Added COMB parameter for feedback resonance tuning
+- Added prompt-based numeric entry refinements and smoothing improvements

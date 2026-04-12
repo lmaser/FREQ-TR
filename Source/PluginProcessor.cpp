@@ -368,8 +368,12 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	smoothedEngine = 0.0f;
 	smoothedShape = 0.0f;
 	smoothedMix = 1.0f;
+	smoothedDryLevel = loadAtomicOrDefault (dryLevelParam, kDryLevelDefault);
+	smoothedWetLevel = loadAtomicOrDefault (wetLevelParam, kWetLevelDefault);
 	smoothedInputGain = 1.0f;
 	smoothedOutputGain = 1.0f;
+	smoothedPan = loadAtomicOrDefault (panParam, kPanDefault);
+	smoothedLimThreshold = fastDecibelsToGain (loadAtomicOrDefault (limThresholdParam, kLimThresholdDefault));
 
 	feedbackSmoothed.reset (currentSampleRate, kFeedbackSmoothingSeconds);
 	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
@@ -642,7 +646,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	// ── Limiter ──
 	const int limMode = loadIntParamOrDefault (limModeParam, kLimModeDefault);
-	const float limThreshLin = (limMode != 0)
+	const float targetLimThreshLin = (limMode != 0)
 		? fastDecibelsToGain (loadAtomicOrDefault (limThresholdParam, kLimThresholdDefault))
 		: 1.0f;
 
@@ -652,6 +656,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int mixMode = loadIntParamOrDefault (mixModeParam, kMixModeDefault);
 	const float dryLevel = loadAtomicOrDefault (dryLevelParam, kDryLevelDefault);
 	const float wetLevel = loadAtomicOrDefault (wetLevelParam, kWetLevelDefault);
+	const float targetPan = loadAtomicOrDefault (panParam, kPanDefault);
 	// Filter / Tilt position
 	{
 		const int fltPos = loadIntParamOrDefault (filterPosParam, kFilterPosDefault);
@@ -846,8 +851,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		smoothedEngine = paramCoeff * smoothedEngine + (1.0f - paramCoeff) * engine;
 		smoothedShape  = paramCoeff * smoothedShape  + (1.0f - paramCoeff) * shape;
 		smoothedMix    = paramCoeff * smoothedMix    + (1.0f - paramCoeff) * mix;
+		smoothedDryLevel = paramCoeff * smoothedDryLevel + (1.0f - paramCoeff) * dryLevel;
+		smoothedWetLevel = paramCoeff * smoothedWetLevel + (1.0f - paramCoeff) * wetLevel;
 		smoothedInputGain  = paramCoeff * smoothedInputGain  + (1.0f - paramCoeff) * inputGain;
 		smoothedOutputGain = paramCoeff * smoothedOutputGain + (1.0f - paramCoeff) * outputGain;
+		smoothedPan = paramCoeff * smoothedPan + (1.0f - paramCoeff) * targetPan;
+		smoothedLimThreshold = paramCoeff * smoothedLimThreshold + (1.0f - paramCoeff) * targetLimThreshLin;
 
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
@@ -1212,7 +1221,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		float wL = wetL * smoothedInputGain * smoothedOutputGain;
 		float wR = wetR * smoothedInputGain * smoothedOutputGain;
 		if (limMode == 1)
-			applyLimiterSample (wL, wR, limThreshLin);
+			applyLimiterSample (wL, wR, smoothedLimThreshold);
 
 		// Invert Polarity / Stereo (WET mode: after Limiter WET)
 		if (invPol == 1) { wL = -wL; wR = -wR; }
@@ -1221,12 +1230,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		float dL, dR;
 		if (mixMode == 1) // SEND: independent dry/wet levels
 		{
-			const float dryGainTarget = dryLevel;
-			const float wetGainTarget = wetLevel;
-			wL *= wetGainTarget;
-			wR *= wetGainTarget;
-			dL = dryRefL * dryGainTarget;
-			dR = dryRefR * dryGainTarget;
+			wL *= smoothedWetLevel;
+			wR *= smoothedWetLevel;
+			dL = dryRefL * smoothedDryLevel;
+			dR = dryRefR * smoothedDryLevel;
 		}
 		else // INSERT: crossfade
 		{
@@ -1255,6 +1262,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			outR = dR - sideBus;
 		}
 
+		if (numChannels >= 2 && std::abs (smoothedPan - 0.5f) > 0.001f)
+		{
+			const float panPhase = smoothedPan * 0.25f;
+			outL *= fastCos (panPhase);
+			outR *= fastSin (panPhase);
+		}
+
+		if (limMode == 2 && numChannels >= 2)
+			applyLimiterSample (outL, outR, smoothedLimThreshold);
+
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
 
@@ -1269,31 +1286,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		hilbertPos = (hilbertPos + 1) & (order - 1);
-	}
-
-	// ── Pan (equal-power sine/cosine) ──
-	{
-		const float pan = panParam->load (std::memory_order_relaxed);
-		const int numCh = buffer.getNumChannels();
-		if (numCh >= 2 && std::abs (pan - 0.5f) > 0.001f)
-		{
-			if (std::abs (pan - lastPan_) > 0.001f)
-			{
-				const float panAngle = pan * 1.5707963f;
-				lastPanLeft_  = std::cos (panAngle);
-				lastPanRight_ = std::sin (panAngle);
-				lastPan_ = pan;
-			}
-			buffer.applyGain (0, 0, numSamples, lastPanLeft_);
-			buffer.applyGain (1, 0, numSamples, lastPanRight_);
-		}
-	}
-
-	// ── User limiter (GLOBAL: after pan, before safety clip) ──
-	if (limMode == 2)
-	{
-		if (buffer.getNumChannels() >= 2)
-			applyLimiter (buffer.getWritePointer (0), buffer.getWritePointer (1), numSamples, limThreshLin);
 	}
 
 	// ── Invert Polarity / Stereo (GLOBAL mode: after Limiter GLOBAL, before safety clip) ──

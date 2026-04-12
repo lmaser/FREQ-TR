@@ -215,7 +215,7 @@ Stereo-linked gain reduction ensures consistent imaging.
 - **Hilbert Transform**: 128-tap FIR filter with Blackman windowing. Antisymmetric tap folding reduces 128 MACs to ~32 per channel per sample.
 - **Matched delay**: Real path delayed by half the FIR order (64 samples) to align with the Hilbert output. The same buffer serves as latency-compensated dry signal for the mix (when ALIGN is ON).
 - **Oscillator**: Band-limited morphing waveform (sine → triangle → square → sawtooth) with per-sample phase accumulation.
-- **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, and mix parameters.
+- **Smoothing**: One-pole EMA (~5 ms) per sample for frequency, engine, shape, mix, send dry/wet levels, input/output gain, pan, limiter threshold, tilt, and filter cutoffs. Feedback uses its own dedicated linear smoother.
 - **Wet filter**: Biquad HP/LP on the wet signal. Transposed Direct Form II. Coefficients updated once per block (channel 0), shared across channels.
 
 ### MIDI Implementation

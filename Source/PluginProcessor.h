@@ -302,10 +302,14 @@ private:
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
 	float smoothedShape = 0.0f;    // EMA-smoothed waveform morph
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
+	float smoothedDryLevel = kDryLevelDefault;
+	float smoothedWetLevel = kWetLevelDefault;
 	bool  filterPre_ = false;
 	bool  tiltPre_   = false;
 	float smoothedInputGain = 1.0f;  // EMA-smoothed input gain (linear)
 	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
+	float smoothedPan = kPanDefault;
+	float smoothedLimThreshold = 1.0f;
 
 	// ── Feedback state ──
 	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;
@@ -409,10 +413,6 @@ private:
 	std::atomic<float>* dryLevelParam    = nullptr;
 	std::atomic<float>* wetLevelParam    = nullptr;
 	std::atomic<float>* filterPosParam   = nullptr;
-	float lastPan_      = -1.0f;
-	float lastPanLeft_  = 1.0f;
-	float lastPanRight_ = 1.0f;
-
 	std::atomic<float>* uiWidthParam   = nullptr;
 	std::atomic<float>* uiHeightParam  = nullptr;
 	std::atomic<float>* uiPaletteParam = nullptr;

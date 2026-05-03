@@ -48,11 +48,12 @@ The value column reflects the current context:
 
 ## Parameters
 
-### INPUT (-100 to 0 dB)
+### INPUT (-INF to +24 dB)
 
 Pre-effect wet gain. This affects only the wet path, not the dry reference.
+The fader floor is -144 dB, displayed as -INF; 0 dB is centered on the control.
 
-### OUTPUT (-100 to +24 dB)
+### OUTPUT (-INF to +24 dB)
 
 Post-effect wet gain.
 

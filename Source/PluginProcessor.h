@@ -16,6 +16,7 @@ public:
 	static constexpr const char* kParamFreqSync   = "freq_sync";
 	static constexpr const char* kParamMod       = "mod";
 	static constexpr const char* kParamFeedback  = "feedback";
+	static constexpr const char* kParamJitter    = "jitter";
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamStyle     = "style";
@@ -94,6 +95,10 @@ public:
 	static constexpr float kFeedbackMin     = 0.0f;
 	static constexpr float kFeedbackMax     = 1.0f;
 	static constexpr float kFeedbackDefault = 0.0f;
+
+	static constexpr float kJitterMin     = 0.0f;
+	static constexpr float kJitterMax     = 1.0f;
+	static constexpr float kJitterDefault = 0.0f;
 
 	static constexpr float kCombMin     = 5.0f;
 	static constexpr float kCombMax     = 750.0f;
@@ -389,6 +394,7 @@ private:
 	std::atomic<float>* freqParam    = nullptr;
 	std::atomic<float>* modParam     = nullptr;
 	std::atomic<float>* feedbackParam = nullptr;
+	std::atomic<float>* jitterParam   = nullptr;
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
@@ -548,6 +554,64 @@ private:
 	float cachedChaosParamSmoothCoeff_   = 0.999f;
 	float chaosDelaySmoothStep_          = 0.001f;
 
+	// JIT: internal frequency/feedback/comb instability, independent from CHS D.
+	float jitterTargetNorm_              = 0.0f;
+	float jitterAmountSmoothed_          = 0.0f;
+	float jitterParamSmoothCoeff_        = 0.999f;
+	bool  jitterParamSmoothReady_        = false;
+	bool  jitterActive_                  = false;
+	bool  jitterStereo_                  = false;
+
+	float jitterFreqPrev_[2]             = {};
+	float jitterFreqCurr_[2]             = {};
+	float jitterFreqNext_[2]             = {};
+	float jitterFreqPhase_[2]            = {};
+	float jitterFreqDriftPhase_[2]       = {};
+	float jitterFreqDriftFreqHz_[2]      = {};
+	float jitterFreqFastPrev_[2]         = {};
+	float jitterFreqFastCurr_[2]         = {};
+	float jitterFreqFastNext_[2]         = {};
+	float jitterFreqFastPhase_[2]        = {};
+	float jitterFreqFastDriftPhase_[2]   = {};
+	float jitterFreqFastDriftFreqHz_[2]  = {};
+	float jitterFreqOut_[2]              = {};
+	juce::Random jitterFreqRng_[2];
+	juce::Random jitterFreqFastRng_[2];
+
+	float jitterFeedbackPrev_            = 0.0f;
+	float jitterFeedbackCurr_            = 0.0f;
+	float jitterFeedbackNext_            = 0.0f;
+	float jitterFeedbackPhase_           = 0.0f;
+	float jitterFeedbackDriftPhase_      = 0.0f;
+	float jitterFeedbackDriftFreqHz_     = 0.0f;
+	float jitterFeedbackFastPrev_        = 0.0f;
+	float jitterFeedbackFastCurr_        = 0.0f;
+	float jitterFeedbackFastNext_        = 0.0f;
+	float jitterFeedbackFastPhase_       = 0.0f;
+	float jitterFeedbackFastDriftPhase_  = 0.0f;
+	float jitterFeedbackFastDriftFreqHz_ = 0.0f;
+	float jitterFeedbackOut_             = 0.0f;
+	juce::Random jitterFeedbackRng_;
+	juce::Random jitterFeedbackFastRng_;
+
+	float jitterCombPrev_                = 0.0f;
+	float jitterCombCurr_                = 0.0f;
+	float jitterCombNext_                = 0.0f;
+	float jitterCombPhase_               = 0.0f;
+	float jitterCombDriftPhase_          = 0.0f;
+	float jitterCombDriftFreqHz_         = 0.0f;
+	float jitterCombFastPrev_            = 0.0f;
+	float jitterCombFastCurr_            = 0.0f;
+	float jitterCombFastNext_            = 0.0f;
+	float jitterCombFastPhase_           = 0.0f;
+	float jitterCombFastDriftPhase_      = 0.0f;
+	float jitterCombFastDriftFreqHz_     = 0.0f;
+	float jitterCombOut_                 = 0.0f;
+	juce::Random jitterCombRng_;
+	juce::Random jitterCombFastRng_;
+
+	void resetJitterState() noexcept;
+
 	// Chaos micro-delay buffer
 	static constexpr int kChaosDelayBufLen = 1024;
 	float chaosDelayBuf_[2][kChaosDelayBufLen] = {};
@@ -585,6 +649,131 @@ private:
 
 		const float shWeight = juce::jlimit (0.0f, 1.0f, amtNorm * 1.5f - 0.15f);
 		output = driftValue + shValue * shWeight;
+	}
+
+	static float smoothStep01 (float x) noexcept
+	{
+		const float t = juce::jlimit (0.0f, 1.0f, x);
+		return t * t * (3.0f - 2.0f * t);
+	}
+
+	inline void advanceJitter() noexcept
+	{
+		const float sr = juce::jmax (1.0f, (float) currentSampleRate);
+		const float smoothStep = 1.0f - jitterParamSmoothCoeff_;
+		const float target = juce::jlimit (0.0f, 1.0f, jitterTargetNorm_);
+
+		if (! jitterParamSmoothReady_)
+		{
+			jitterParamSmoothReady_ = true;
+		}
+		else
+		{
+			jitterAmountSmoothed_ += (target - jitterAmountSmoothed_) * smoothStep;
+		}
+
+		if (target <= 0.000001f && jitterAmountSmoothed_ <= 0.000001f)
+		{
+			jitterAmountSmoothed_ = 0.0f;
+			jitterParamSmoothReady_ = false;
+			jitterActive_ = false;
+			jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+			jitterFeedbackOut_ = 0.0f;
+			jitterCombOut_ = 0.0f;
+			return;
+		}
+
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		const float high = smoothStep01 ((amt - 0.60f) / 0.40f);
+		const float fastMix = smoothStep01 ((amt - 0.70f) / 0.30f) * 0.36f;
+		const float slowRateHz = 0.15f + amt * 0.55f + high * 1.65f;
+		const float fastRateHz = 3.0f + amt * amt * 24.0f + high * 28.0f;
+		const float slowPeriod = sr / juce::jmax (0.01f, slowRateHz);
+		const float fastPeriod = sr / juce::jmax (0.01f, fastRateHz);
+		const int nCh = jitterStereo_ ? 2 : 1;
+
+		for (int ch = 0; ch < nCh; ++ch)
+		{
+			float slowOut = 0.0f;
+			float fastOut = 0.0f;
+			advanceChaosEngine (jitterFreqPrev_[ch], jitterFreqCurr_[ch], jitterFreqNext_[ch],
+			                    jitterFreqPhase_[ch], jitterFreqDriftPhase_[ch],
+			                    jitterFreqDriftFreqHz_[ch], slowOut, jitterFreqRng_[ch],
+			                    slowPeriod, amt, sr);
+			advanceChaosEngine (jitterFreqFastPrev_[ch], jitterFreqFastCurr_[ch], jitterFreqFastNext_[ch],
+			                    jitterFreqFastPhase_[ch], jitterFreqFastDriftPhase_[ch],
+			                    jitterFreqFastDriftFreqHz_[ch], fastOut, jitterFreqFastRng_[ch],
+			                    fastPeriod, amt, sr);
+			jitterFreqOut_[ch] = juce::jlimit (-1.15f, 1.15f, slowOut * (1.0f - fastMix) + fastOut * fastMix);
+		}
+
+		if (! jitterStereo_)
+			jitterFreqOut_[1] = jitterFreqOut_[0];
+
+		float feedbackSlow = 0.0f;
+		float feedbackFast = 0.0f;
+		advanceChaosEngine (jitterFeedbackPrev_, jitterFeedbackCurr_, jitterFeedbackNext_,
+		                    jitterFeedbackPhase_, jitterFeedbackDriftPhase_, jitterFeedbackDriftFreqHz_,
+		                    feedbackSlow, jitterFeedbackRng_, slowPeriod * 1.23f, amt, sr);
+		advanceChaosEngine (jitterFeedbackFastPrev_, jitterFeedbackFastCurr_, jitterFeedbackFastNext_,
+		                    jitterFeedbackFastPhase_, jitterFeedbackFastDriftPhase_, jitterFeedbackFastDriftFreqHz_,
+		                    feedbackFast, jitterFeedbackFastRng_, fastPeriod * 0.83f, amt, sr);
+		jitterFeedbackOut_ = juce::jlimit (-1.0f, 1.0f, feedbackSlow * 0.72f + feedbackFast * fastMix * 0.70f);
+
+		float combSlow = 0.0f;
+		float combFast = 0.0f;
+		advanceChaosEngine (jitterCombPrev_, jitterCombCurr_, jitterCombNext_,
+		                    jitterCombPhase_, jitterCombDriftPhase_, jitterCombDriftFreqHz_,
+		                    combSlow, jitterCombRng_, slowPeriod * 1.47f, amt, sr);
+		advanceChaosEngine (jitterCombFastPrev_, jitterCombFastCurr_, jitterCombFastNext_,
+		                    jitterCombFastPhase_, jitterCombFastDriftPhase_, jitterCombFastDriftFreqHz_,
+		                    combFast, jitterCombFastRng_, fastPeriod * 0.61f, amt, sr);
+		jitterCombOut_ = juce::jlimit (-1.0f, 1.0f, combSlow * 0.80f + combFast * fastMix * 0.45f);
+	}
+
+	inline float getJitterFreqMultiplier (int channel) const noexcept
+	{
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		if (! jitterActive_ || amt <= 0.000001f)
+			return 1.0f;
+
+		const int lane = juce::jlimit (0, 1, channel);
+		const float high = smoothStep01 ((amt - 0.72f) / 0.28f);
+		const float depthOct = (0.004f + 0.026f * amt) * amt * (1.0f + high * 0.25f);
+		return std::exp2 (jitterFreqOut_[lane] * depthOct);
+	}
+
+	inline float getJitterSyncPhaseOffset (int channel) const noexcept
+	{
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		if (! jitterActive_ || amt <= 0.000001f)
+			return 0.0f;
+
+		const int lane = juce::jlimit (0, 1, channel);
+		const float high = smoothStep01 ((amt - 0.72f) / 0.28f);
+		const float depthCycles = (0.00015f + 0.00125f * amt) * amt * (1.0f + high * 0.55f);
+		return jitterFreqOut_[lane] * depthCycles;
+	}
+
+	inline float applyJitterToFeedbackMagnitude (float feedbackMagnitude) const noexcept
+	{
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		if (! jitterActive_ || amt <= 0.000001f || feedbackMagnitude <= 0.0f)
+			return feedbackMagnitude;
+
+		const float depth = (0.012f + 0.045f * amt) * amt;
+		return juce::jlimit (0.0f, 0.99f, feedbackMagnitude * (1.0f + jitterFeedbackOut_ * depth));
+	}
+
+	inline float applyJitterToCombTarget (float combSamples) const noexcept
+	{
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		if (! jitterActive_ || amt <= 0.000001f || combSamples <= 1.0f)
+			return combSamples;
+
+		const float high = smoothStep01 ((amt - 0.75f) / 0.25f);
+		const float depth = (0.0025f + 0.010f * amt) * amt * (1.0f + high * 0.25f);
+		return juce::jlimit (1.0f, (float) kFbkDelayMaxSamples, combSamples * (1.0f + jitterCombOut_ * depth));
 	}
 
 	inline void advanceChaosD() noexcept

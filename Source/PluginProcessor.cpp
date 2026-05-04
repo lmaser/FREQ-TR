@@ -160,6 +160,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	freqParam    = apvts.getRawParameterValue (kParamFreq);
 	modParam     = apvts.getRawParameterValue (kParamMod);
 	feedbackParam = apvts.getRawParameterValue (kParamFeedback);
+	jitterParam   = apvts.getRawParameterValue (kParamJitter);
 	combParam     = apvts.getRawParameterValue (kParamComb);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
@@ -485,11 +486,13 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 		chaosDelaySmoothedSamples_[c] = 0.0f;
 		chaosDelaySmoothReady_[c] = false;
 	}
+	resetJitterState();
 
 	// Precompute sampleRate-dependent smooth coefficients
 	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 	chaosDelaySmoothStep_        = 1.0f - std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
+	jitterParamSmoothCoeff_      = std::exp (-1.0f / ((float) currentSampleRate * 0.025f));
 
 	// Limiter state reset
 	limEnv1_[0] = limEnv1_[1] = kLimFloor;
@@ -497,6 +500,60 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	limAtt1_ = std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
 	limRel1_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 	limRel2_ = std::exp (-1.0f / ((float) currentSampleRate * 0.100f));
+}
+
+void FREQTRAudioProcessor::resetJitterState() noexcept
+{
+	jitterTargetNorm_ = 0.0f;
+	jitterAmountSmoothed_ = 0.0f;
+	jitterParamSmoothReady_ = false;
+	jitterActive_ = false;
+	jitterStereo_ = false;
+	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+	jitterFeedbackOut_ = 0.0f;
+	jitterCombOut_ = 0.0f;
+
+	auto initLane = [] (float& prev, float& curr, float& next, float& phase,
+	                    float& driftPhase, float& driftFreqHz, float& out,
+	                    juce::Random& rng, juce::int64 seed) noexcept
+	{
+		rng.setSeed (seed);
+		prev = rng.nextFloat() * 2.0f - 1.0f;
+		curr = prev;
+		next = rng.nextFloat() * 2.0f - 1.0f;
+		phase = rng.nextFloat();
+		driftPhase = rng.nextFloat();
+		driftFreqHz = 0.0f;
+		out = 0.0f;
+	};
+
+	for (int ch = 0; ch < 2; ++ch)
+	{
+		const juce::int64 seedBase = (ch == 0) ? 0x465245514a495431ll : 0x465245514a495432ll;
+		initLane (jitterFreqPrev_[ch], jitterFreqCurr_[ch], jitterFreqNext_[ch],
+		          jitterFreqPhase_[ch], jitterFreqDriftPhase_[ch], jitterFreqDriftFreqHz_[ch],
+		          jitterFreqOut_[ch], jitterFreqRng_[ch], seedBase + 0x11ll);
+		initLane (jitterFreqFastPrev_[ch], jitterFreqFastCurr_[ch], jitterFreqFastNext_[ch],
+		          jitterFreqFastPhase_[ch], jitterFreqFastDriftPhase_[ch], jitterFreqFastDriftFreqHz_[ch],
+		          jitterFreqOut_[ch], jitterFreqFastRng_[ch], seedBase + 0x2fll);
+	}
+
+	initLane (jitterFeedbackPrev_, jitterFeedbackCurr_, jitterFeedbackNext_,
+	          jitterFeedbackPhase_, jitterFeedbackDriftPhase_, jitterFeedbackDriftFreqHz_,
+	          jitterFeedbackOut_, jitterFeedbackRng_, 0x465245514a495446ll);
+	initLane (jitterFeedbackFastPrev_, jitterFeedbackFastCurr_, jitterFeedbackFastNext_,
+	          jitterFeedbackFastPhase_, jitterFeedbackFastDriftPhase_, jitterFeedbackFastDriftFreqHz_,
+	          jitterFeedbackOut_, jitterFeedbackFastRng_, 0x465245514a495447ll);
+	initLane (jitterCombPrev_, jitterCombCurr_, jitterCombNext_,
+	          jitterCombPhase_, jitterCombDriftPhase_, jitterCombDriftFreqHz_,
+	          jitterCombOut_, jitterCombRng_, 0x465245514a495443ll);
+	initLane (jitterCombFastPrev_, jitterCombFastCurr_, jitterCombFastNext_,
+	          jitterCombFastPhase_, jitterCombFastDriftPhase_, jitterCombFastDriftFreqHz_,
+	          jitterCombOut_, jitterCombFastRng_, 0x465245514a495448ll);
+
+	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+	jitterFeedbackOut_ = 0.0f;
+	jitterCombOut_ = 0.0f;
 }
 
 void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
@@ -679,6 +736,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float harm   = loadAtomicOrDefault (harmParam, kHarmDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
+	const float jitterTarget = juce::jlimit (kJitterMin, kJitterMax, loadAtomicOrDefault (jitterParam, kJitterDefault));
+	jitterTargetNorm_ = jitterTarget;
+	jitterStereo_ = (style >= 1);
+	jitterActive_ = (jitterTarget > 0.000001f)
+	             || (jitterAmountSmoothed_ > 0.000001f)
+	             || jitterParamSmoothReady_;
 	const float mix    = loadAtomicOrDefault (mixParam, kMixDefault);
 	const float inputDb  = loadAtomicOrDefault (inputParam, kInputDefault);
 	const float outputDb = loadAtomicOrDefault (outputParam, kOutputDefault);
@@ -919,19 +982,29 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		smoothedPan = paramCoeff * smoothedPan + (1.0f - paramCoeff) * targetPan;
 		smoothedLimThreshold = paramCoeff * smoothedLimThreshold + (1.0f - paramCoeff) * targetLimThreshLin;
 
+		if (jitterActive_)
+			advanceJitter();
+
+		const float rFreqRatio = (style == 3) ? 0.5f : 1.0f;
+		const float baseFreqL = smoothedFreq;
+		const float baseFreqR = smoothedFreq * rFreqRatio;
+		const float jitteredFreqL = baseFreqL * getJitterFreqMultiplier (0);
+		const float jitteredFreqR = baseFreqR * getJitterFreqMultiplier (1);
+
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
 		{
-			oscPhase = syncRetrigPhase + (double) smoothedFreq * ((double) n * (double) invSr);
+			oscPhase = syncRetrigPhase + (double) baseFreqL * ((double) n * (double) invSr)
+				+ (double) getJitterSyncPhaseOffset (0);
 			oscPhase -= std::floor (oscPhase);
 		}
 
 		// R-channel phase: only DUAL uses a different rate (×0.5)
 		// WIDE uses the same oscillator as L (opposite sideband, not different rate)
-		const float rFreqRatio = (style == 3) ? 0.5f : 1.0f;
 		if (useSyncRetrigPhase)
 		{
-			oscPhaseR = syncRetrigPhase + (double) (smoothedFreq * rFreqRatio) * ((double) n * (double) invSr);
+			oscPhaseR = syncRetrigPhase + (double) baseFreqR * ((double) n * (double) invSr)
+				+ (double) getJitterSyncPhaseOffset (1);
 			oscPhaseR -= std::floor (oscPhaseR);
 		}
 
@@ -951,11 +1024,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		cleanDelayBufR[(size_t) hilbertPos] = mInR;
 
 		// Feedback: read from Comb-controlled delay line
-		const float fb = feedbackSmoothed.getNextValue();
-		const float effectiveFb = (std::abs (smoothedFreq) < 0.001f) ? 0.0f : fb;
+		const float fb = applyJitterToFeedbackMagnitude (feedbackSmoothed.getNextValue());
+		const float effectiveFb = (std::abs (jitteredFreqL) < 0.001f) ? 0.0f : fb;
 
 		// Smooth the comb size to avoid clicks
-		smoothedComb_ = smoothedComb_ * 0.999f + targetComb * 0.001f;
+		const float jitteredTargetComb = applyJitterToCombTarget (targetComb);
+		smoothedComb_ = smoothedComb_ * 0.999f + jitteredTargetComb * 0.001f;
 		const int combSamples = juce::jlimit (1, kFbkDelayMaxSamples,
 			(int) std::round (smoothedComb_));
 
@@ -1097,8 +1171,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float realR = hilbertBufR[(size_t) delayIdx];
 
 		// Harmonic density and quadrature oscillator pair
-		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, smoothedFreq);
-		const float harmonicCountR = getEffectiveHarmonicCount (smoothedHarm, smoothedFreq * rFreqRatio);
+		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqL);
+		const float harmonicCountR = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqR);
 		const float harmGainL = getHarmGainForCount (harmonicCountL);
 		const float harmGainR = getHarmGainForCount (harmonicCountR);
 		const auto harmPairL = fastHarmonicOscPair ((float) oscPhase, harmonicCountL);
@@ -1114,7 +1188,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const bool useStereoInput = (style >= 1);
 		float wetL, wetR;
 
-		if (std::abs (smoothedFreq) < 0.001f)
+		if (std::abs (jitteredFreqL) < 0.001f)
 		{
 			wetL = realL;
 			wetR = useStereoInput ? realR : realL;
@@ -1357,10 +1431,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// Advance oscillator phase (free-running mode only)
 		if (! useSyncRetrigPhase)
 		{
-			oscPhase += (double) smoothedFreq * (double) invSr;
+			oscPhase += (double) jitteredFreqL * (double) invSr;
 			oscPhase -= std::floor (oscPhase);
 
-			oscPhaseR += (double) (smoothedFreq * rFreqRatio) * (double) invSr;
+			oscPhaseR += (double) jitteredFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
 		}
 
@@ -1454,6 +1528,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamFeedback, "Feedback",
 		juce::NormalisableRange<float> (kFeedbackMin, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamJitter, "Jitter",
+		juce::NormalisableRange<float> (kJitterMin, kJitterMax, 0.001f, 1.0f), kJitterDefault));
 	// Comb: resonant frequency in Hz (5..750), controls feedback comb pitch
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamComb, "Comb",

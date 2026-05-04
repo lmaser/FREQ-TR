@@ -120,13 +120,14 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 14 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
+    // 15 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, JIT, COMB, ENGINE, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
     BarSlider freqSlider;
     BarSlider modSlider;
     BarSlider feedbackSlider;
+    BarSlider jitterSlider;
     BarSlider combSlider;
     BarSlider engineSlider;
     BarSlider harmSlider;
@@ -266,6 +267,7 @@ private:
     std::unique_ptr<SliderAttachment> freqSyncAttachment;
     std::unique_ptr<SliderAttachment> modAttachment;
     std::unique_ptr<SliderAttachment> feedbackAttachment;
+    std::unique_ptr<SliderAttachment> jitterAttachment;
     std::unique_ptr<SliderAttachment> combAttachment;
     std::unique_ptr<SliderAttachment> engineAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
@@ -430,6 +432,9 @@ private:
     juce::String getFeedbackText() const;
     juce::String getFeedbackTextShort() const;
 
+    juce::String getJitterText() const;
+    juce::String getJitterTextShort() const;
+
     juce::String getCombText() const;
     juce::String getCombTextShort() const;
 
@@ -496,6 +501,8 @@ private:
     juce::String cachedModTextShort;
     juce::String cachedFeedbackTextFull;
     juce::String cachedFeedbackTextShort;
+    juce::String cachedJitterTextFull;
+    juce::String cachedJitterTextShort;
     juce::String cachedCombTextFull;
     juce::String cachedCombTextShort;
     juce::String cachedEngineTextFull;
@@ -528,6 +535,7 @@ private:
     juce::String cachedFreqIntOnly;
     juce::String cachedModIntOnly;
     juce::String cachedFeedbackIntOnly;
+    juce::String cachedJitterIntOnly;
     juce::String cachedCombIntOnly;
     juce::String cachedEngineIntOnly;
     juce::String cachedHarmIntOnly;
@@ -547,7 +555,7 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 12> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 13> cachedValueAreas_;
     juce::Rectangle<int> cachedFilterValueArea_;
     juce::Rectangle<int> cachedPanValueArea_;
     juce::Rectangle<int> cachedLimThresholdValueArea_;

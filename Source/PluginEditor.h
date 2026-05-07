@@ -135,6 +135,38 @@ private:
             return juce::Slider::snapValue (attemptedValue, dragMode);
         }
 
+        double valueToProportionOfLength (double value) override
+        {
+            if (owner != nullptr && this == &owner->windowSlider)
+            {
+                const int maxLane = FREQTRAudioProcessor::getHilbertWindowLane (owner->getCurrentMaxHilbertWindow());
+                if (maxLane <= 0)
+                    return 1.0;
+
+                const int lane = juce::jlimit (0, maxLane,
+                    FREQTRAudioProcessor::getHilbertWindowLane ((int) std::lround (value)));
+                return (double) lane / (double) maxLane;
+            }
+
+            return juce::Slider::valueToProportionOfLength (value);
+        }
+
+        double proportionOfLengthToValue (double proportion) override
+        {
+            if (owner != nullptr && this == &owner->windowSlider)
+            {
+                const int maxLane = FREQTRAudioProcessor::getHilbertWindowLane (owner->getCurrentMaxHilbertWindow());
+                if (maxLane <= 0)
+                    return (double) FREQTRAudioProcessor::kHilbertWindowMin;
+
+                const int lane = juce::jlimit (0, maxLane,
+                    (int) std::lround (juce::jlimit (0.0, 1.0, proportion) * (double) maxLane));
+                return (double) FREQTRAudioProcessor::kHilbertWindows[lane];
+            }
+
+            return juce::Slider::proportionOfLengthToValue (proportion);
+        }
+
     private:
         FREQTRAudioProcessorEditor* owner = nullptr;
         bool allowNumericPopup = true;

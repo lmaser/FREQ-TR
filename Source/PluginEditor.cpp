@@ -6340,21 +6340,25 @@ void FREQTRAudioProcessorEditor::resized()
         mixSlider.setBounds     (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
         limThresholdSlider.setBounds (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
 
-        const int modeRowPad = 10;
-
         // Mode In / Mode Out / Sum Bus / Limiter Mode — 4 combos on row 7
         {
-            const int modeY = mainTop + 7 * step + modeRowPad;
             const int comboGap = 4;
             const int totalW = horizontalLayout.barW + horizontalLayout.valuePad + horizontalLayout.valueW;
             const int comboW = (totalW - comboGap * 3) / 4;
-            const int comboH = juce::jlimit (32, 42, verticalLayout.barH + 8);
+            const int comboH = juce::jlimit (34, 44, verticalLayout.barH + 10);
+            const int labelOffset = 15;
+            const int comboBlockH = labelOffset + comboH + comboGap + labelOffset + comboH;
+            const int blockTopLimit = limThresholdSlider.getBottom() + verticalLayout.gapY;
+            const int blockBottomLimit = verticalLayout.chaosRowY - verticalLayout.gapY;
+            const int availableBlockH = juce::jmax (comboBlockH, blockBottomLimit - blockTopLimit);
+            const int visualTop = blockTopLimit + juce::jmax (0, (availableBlockH - comboBlockH) / 2);
+            const int modeY = visualTop + labelOffset;
             modeInCombo.setBounds  (horizontalLayout.leftX,                           modeY, comboW, comboH);
             modeOutCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap),      modeY, comboW, comboH);
             sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGap) * 2,  modeY, comboW, comboH);
             limModeCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap) * 3,  modeY, comboW, comboH);
 
-            const int invY = modeY + comboH + comboGap + 15;  // +15 for legend label space
+            const int invY = modeY + comboH + comboGap + labelOffset;
             const int comboW2 = (totalW - comboGap * 3) / 4;
             mixModeCombo.setBounds   (horizontalLayout.leftX,                             invY, comboW2, comboH);
             filterPosCombo.setBounds (horizontalLayout.leftX + (comboW2 + comboGap),       invY, comboW2, comboH);

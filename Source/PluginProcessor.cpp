@@ -416,8 +416,15 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainDcPrevOutR_ = 0.0f;
 	sidechainToneStateL_ = 0.0f;
 	sidechainToneStateR_ = 0.0f;
+	sidechainToneState2L_ = 0.0f;
+	sidechainToneState2R_ = 0.0f;
+	sidechainToneState3L_ = 0.0f;
+	sidechainToneState3R_ = 0.0f;
+	sidechainToneState4L_ = 0.0f;
+	sidechainToneState4R_ = 0.0f;
 	sidechainRmsEnv_ = 0.0f;
 	sidechainGateSmoothed_ = 0.0f;
+	sidechainDepthSmoothed_ = 0.0f;
 	lastMidiNote.store (-1, std::memory_order_relaxed);
 	lastMidiVelocity.store (0, std::memory_order_relaxed);
 	currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
@@ -826,10 +833,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainAgcTau = 0.020f + sidechainTimeTarget * 0.130f;
 	const float sidechainAgcCoeff = std::exp (-1.0f / ((float) currentSampleRate * sidechainAgcTau));
 	const float sidechainDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * 20.0f / (float) currentSampleRate);
-	const bool sidechainToneBypassed = sidechainToneTarget >= (kSidechainToneMax - 1.0f);
-	const float sidechainToneCoeff = sidechainToneBypassed
-		? 0.0f
-		: std::exp (-juce::MathConstants<float>::twoPi * sidechainToneTarget / (float) currentSampleRate);
+	const float sidechainTonePoleHz = juce::jmin ((float) currentSampleRate * 0.45f, sidechainToneTarget * 2.30f);
+	const float sidechainToneCoeff = std::exp (-juce::MathConstants<float>::twoPi * sidechainTonePoleHz / (float) currentSampleRate);
 
 	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
 
@@ -1102,26 +1107,35 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		float sidechainToneL = sidechainDcL;
 		float sidechainToneR = sidechainDcR;
-		if (! sidechainToneBypassed)
-		{
-			sidechainToneStateL_ = sidechainToneCoeff * sidechainToneStateL_
-				+ (1.0f - sidechainToneCoeff) * sidechainDcL;
-			sidechainToneStateR_ = sidechainToneCoeff * sidechainToneStateR_
-				+ (1.0f - sidechainToneCoeff) * sidechainDcR;
-			sidechainToneL = sidechainToneStateL_;
-			sidechainToneR = sidechainToneStateR_;
-		}
-		else
-		{
-			sidechainToneStateL_ = sidechainToneL;
-			sidechainToneStateR_ = sidechainToneR;
-		}
+		sidechainToneStateL_ = sidechainToneCoeff * sidechainToneStateL_
+			+ (1.0f - sidechainToneCoeff) * sidechainDcL;
+		sidechainToneStateR_ = sidechainToneCoeff * sidechainToneStateR_
+			+ (1.0f - sidechainToneCoeff) * sidechainDcR;
+		sidechainToneState2L_ = sidechainToneCoeff * sidechainToneState2L_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneStateL_;
+		sidechainToneState2R_ = sidechainToneCoeff * sidechainToneState2R_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneStateR_;
+		sidechainToneState3L_ = sidechainToneCoeff * sidechainToneState3L_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneState2L_;
+		sidechainToneState3R_ = sidechainToneCoeff * sidechainToneState3R_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneState2R_;
+		sidechainToneState4L_ = sidechainToneCoeff * sidechainToneState4L_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneState3L_;
+		sidechainToneState4R_ = sidechainToneCoeff * sidechainToneState4R_
+			+ (1.0f - sidechainToneCoeff) * sidechainToneState3R_;
+		sidechainToneL = sidechainToneState4L_;
+		sidechainToneR = sidechainToneState4R_;
 
 		const float sidechainEnergy = 0.5f * (sidechainToneL * sidechainToneL
 			+ sidechainToneR * sidechainToneR);
 		sidechainRmsEnv_ = sidechainAgcCoeff * sidechainRmsEnv_
 			+ (1.0f - sidechainAgcCoeff) * sidechainEnergy;
 		const float sidechainRms = std::sqrt (juce::jmax (sidechainRmsEnv_, 1.0e-10f));
+		const float sidechainDepthTarget = sidechainHasInput
+			? std::sqrt (juce::jlimit (0.0f, 1.0f, sidechainRms * 8.0f))
+			: 0.0f;
+		sidechainDepthSmoothed_ = sidechainGateCoeff * sidechainDepthSmoothed_
+			+ (1.0f - sidechainGateCoeff) * sidechainDepthTarget;
 		const float sidechainAutoGain = juce::jlimit (0.35f, 3.0f, 0.5f / sidechainRms);
 		const float sidechainPartialGain = 1.0f + 0.65f * (sidechainAutoGain - 1.0f);
 		const float sidechainCarrierL = sidechainHasInput ? sidechainToneL * sidechainPartialGain : 0.0f;
@@ -1330,9 +1344,25 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				{
 					return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, carrier);
 				};
+				const auto normaliseCarrier = [] (float real, float imag) noexcept
+				{
+					const float magSq = real * real + imag * imag;
+					if (magSq <= 1.0e-8f)
+						return std::pair<float, float> { 0.0f, 0.0f };
+
+					const float invMag = 1.0f / std::sqrt (magSq);
+					return std::pair<float, float> {
+						juce::jlimit (-1.0f, 1.0f, real * invMag),
+						juce::jlimit (-1.0f, 1.0f, imag * invMag)
+					};
+				};
 
 				const float sidechainSignedCarrierL = sidechainRealL * sidechainPolaritySign;
 				const float sidechainSignedCarrierR = sidechainRealR * sidechainPolaritySign;
+				const auto sidechainNormL = normaliseCarrier (sidechainRealL, sidechainHilbL);
+				const auto sidechainNormR = normaliseCarrier (sidechainRealR, sidechainHilbR);
+				const float sidechainNormSignedCarrierL = sidechainNormL.first * sidechainPolaritySign;
+				const float sidechainNormSignedCarrierR = sidechainNormR.first * sidechainPolaritySign;
 				const float carrierWaveL = sidechainEnabled ? sidechainSignedCarrierL : oscWave;
 				const float carrierWaveR = sidechainEnabled
 					? (useStereoInput
@@ -1346,19 +1376,32 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 						                : oscWave))
 						: oscWave);
 
-				const float fsCosL = sidechainEnabled ? sidechainRealL : oscWaveCos;
-				const float fsSinL = sidechainEnabled ? sidechainHilbL * sidechainPolaritySign : oscWave;
+				const float rmCarrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : oscWave;
+				const float rmCarrierWaveR = sidechainEnabled
+					? (useStereoInput
+						? (style == 2 ? -sidechainNormSignedCarrierL
+						  : (style == 3 ? sidechainNormSignedCarrierR
+						                : sidechainNormSignedCarrierR))
+						: sidechainNormSignedCarrierL)
+					: (useStereoInput
+						? (style == 2 ? -oscWave
+						  : (style == 3 ? oscWaveR
+						                : oscWave))
+						: oscWave);
+
+				const float fsCosL = sidechainEnabled ? sidechainNormL.first : oscWaveCos;
+				const float fsSinL = sidechainEnabled ? sidechainNormL.second * sidechainPolaritySign : oscWave;
 				const float fsCosR = sidechainEnabled
-					? (style == 3 ? sidechainRealR : sidechainRealL)
+					? (style == 3 ? sidechainNormR.first : sidechainNormL.first)
 					: (style == 3 ? oscWaveCosR : oscWaveCos);
 				const float fsSinR = sidechainEnabled
-					? ((style == 3 ? sidechainHilbR : sidechainHilbL) * sidechainPolaritySign)
+					? ((style == 3 ? sidechainNormR.second : sidechainNormL.second) * sidechainPolaritySign)
 					: (style == 3 ? oscWaveR : oscWave);
 
 				const float amL = realL * amEnvelope (carrierWaveL);
 				const float amR = useStereoInput ? (realR * amEnvelope (carrierWaveR)) : amL;
-				const float rmL = realL * carrierWaveL;
-				const float rmR = useStereoInput ? (realR * carrierWaveR) : rmL;
+				const float rmL = realL * rmCarrierWaveL;
+				const float rmR = useStereoInput ? (realR * rmCarrierWaveR) : rmL;
 
 				const float fsL = realL * fsCosL - hilbL * fsSinL;
 				const float fsR = useStereoInput
@@ -1382,7 +1425,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 				if (sidechainEnabled)
 				{
-					const float scMix = juce::jlimit (0.0f, 1.0f, sidechainGateSmoothed_ * sidechainPolarityAbs);
+					const float rmFsWeight = enginePos < 0.5f ? enginePos * 2.0f : 1.0f;
+					const float depth = juce::jlimit (0.0f, 1.0f, sidechainDepthSmoothed_);
+					const float scMixDepth = 1.0f + rmFsWeight * (depth - 1.0f);
+					const float scMix = juce::jlimit (0.0f, 1.0f,
+						sidechainGateSmoothed_ * sidechainPolarityAbs * scMixDepth);
 					const float dryCoreR = useStereoInput ? realR : realL;
 					coreL = realL + scMix * (coreL - realL);
 					coreR = dryCoreR + scMix * (coreR - dryCoreR);

@@ -3514,7 +3514,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     {
         te->setFont (f);
         te->applyFontToAllText (f);
-        te->setInputFilter (new UnitInputFilter (FREQTRAudioProcessor::kSidechainToneMax, 5, false), true);
+        te->setInputFilter (new UnitInputFilter (FREQTRAudioProcessor::kSidechainToneMax, 4, false), true);
     }
 
     auto syncing = std::make_shared<bool> (false);
@@ -3568,24 +3568,27 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         const int contentW = aw->getWidth() - contentPad * 2;
         const int maxLabelW = juce::jmax (stringWidth (timeLabel->getFont(), timeLabel->getText()),
                                           stringWidth (toneLabel->getFont(), toneLabel->getText())) + 8;
-        const int maxUnitW = juce::jmax (stringWidth (timeUnit->getFont(), timeUnit->getText()),
-                                         stringWidth (toneUnit->getFont(), toneUnit->getText())) + 8;
-        const int spaceW = juce::jmax (6, stringWidth (timeTe->getFont(), " "));
+        const int labelValueGap = juce::jmax (8, stringWidth (timeTe->getFont(), " "));
+        const int unitGap = 2;
 
         auto placeRow = [&] (juce::TextEditor* te, juce::Label* name, juce::Label* unit,
                              PromptBar* bar, int y)
         {
             const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
             const bool isToneRow = te == toneTe;
-            const int worstTextW = stringWidth (te->getFont(), isToneRow ? "20000" : "1.00");
-            const int editorW = juce::jmax (36, juce::jmax (textW, worstTextW) + 18);
-            const int visualW = maxLabelW + spaceW + editorW + spaceW + maxUnitW;
-            const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
+            const int worstTextW = stringWidth (te->getFont(), isToneRow ? "5000" : "1.00");
+            const int unitW = stringWidth (unit->getFont(), unit->getText()) + 4;
+            const int idealEditorW = juce::jmax (36, juce::jmax (textW, worstTextW) + 10);
+            const int maxEditorW = juce::jmax (36, contentW - maxLabelW - labelValueGap - unitGap - unitW);
+            const int editorW = juce::jmin (idealEditorW, maxEditorW);
+            const int visualW = maxLabelW + labelValueGap + editorW + unitGap + unitW;
+            const int availableShift = juce::jmax (0, contentW - visualW);
+            const int blockLeft = contentPad + (availableShift / 2);
 
             name->setBounds (blockLeft, y, maxLabelW, rowH);
-            auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + spaceW, y, editorW, rowH);
+            auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + labelValueGap, y, editorW, rowH);
             te->setBounds (textBounds);
-            unit->setBounds (textBounds.getRight() + spaceW, y, maxUnitW, rowH);
+            unit->setBounds (textBounds.getRight() + unitGap, y, unitW, rowH);
             bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
         };
 

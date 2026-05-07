@@ -155,8 +155,8 @@ public:
 	static constexpr float kSidechainTimeMax     = 1.0f;
 	static constexpr float kSidechainTimeDefault = 0.25f;
 	static constexpr float kSidechainToneMin     = 250.0f;
-	static constexpr float kSidechainToneMax     = 20000.0f;
-	static constexpr float kSidechainToneDefault = 20000.0f;
+	static constexpr float kSidechainToneMax     = 5000.0f;
+	static constexpr float kSidechainToneDefault = 5000.0f;
 
 	static constexpr float kMixMin     = 0.0f;
 	static constexpr float kMixMax     = 1.0f;
@@ -379,8 +379,15 @@ private:
 	float sidechainDcPrevOutR_ = 0.0f;
 	float sidechainToneStateL_ = 0.0f;
 	float sidechainToneStateR_ = 0.0f;
+	float sidechainToneState2L_ = 0.0f;
+	float sidechainToneState2R_ = 0.0f;
+	float sidechainToneState3L_ = 0.0f;
+	float sidechainToneState3R_ = 0.0f;
+	float sidechainToneState4L_ = 0.0f;
+	float sidechainToneState4R_ = 0.0f;
 	float sidechainRmsEnv_ = 0.0f;
 	float sidechainGateSmoothed_ = 0.0f;
+	float sidechainDepthSmoothed_ = 0.0f;
 
 	// ── Feedback state ──
 	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;

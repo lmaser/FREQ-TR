@@ -20,6 +20,7 @@ public:
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamWindow    = "window";
+	static constexpr const char* kParamMaxWindow = "max_window";
 	static constexpr const char* kParamStyle     = "style";
 	static constexpr const char* kParamHarm      = "harm";
 	static constexpr const char* kParamPolarity  = "polarity";
@@ -111,6 +112,7 @@ public:
 	static constexpr int kHilbertWindowMin = 128;
 	static constexpr int kHilbertWindowMax = 2048;
 	static constexpr int kHilbertWindowDefault = 2048;
+	static constexpr int kHilbertMaxWindowDefault = 2048;
 	static constexpr int kNumHilbertWindows = 5;
 	static constexpr int kHilbertWindows[kNumHilbertWindows] = { 128, 256, 512, 1024, 2048 };
 	static constexpr int kHilbertMaxOrder = kHilbertWindowMax;
@@ -124,6 +126,12 @@ public:
 		if (windowValue <= 768)  return 512;
 		if (windowValue <= 1536) return 1024;
 		return 2048;
+	}
+
+	static int getHilbertDelayForWindow (int windowValue) noexcept
+	{
+		const int canonical = getCanonicalHilbertWindow (windowValue);
+		return (canonical - 1) / 2;
 	}
 
 	static int getHilbertWindowLane (int windowValue) noexcept
@@ -455,6 +463,7 @@ private:
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* windowParam  = nullptr;
+	std::atomic<float>* maxWindowParam = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
 	std::atomic<float>* harmParam    = nullptr;
 	std::atomic<float>* polarityParam = nullptr;

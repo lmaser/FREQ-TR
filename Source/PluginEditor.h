@@ -30,6 +30,7 @@ private:
     void openNumericEntryPopupForSlider (juce::Slider& s);
     void openMidiChannelPrompt();
     void openRetrigPrompt();
+    void openPdcMaxWindowPrompt();
     void openSidechainPrompt();
     void scheduleRetrigTipAutoHide();
     void openFilterPrompt();
@@ -103,7 +104,10 @@ private:
             }
 
             if (owner != nullptr && this == &owner->windowSlider)
-                return juce::String ((int) FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (v)));
+            {
+                const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (v));
+                return juce::String (juce::jmin (window, owner->getCurrentMaxHilbertWindow()));
+            }
 
             // For polarity (-1 to 1)
             if (owner != nullptr && this == &owner->polaritySlider)
@@ -122,8 +126,11 @@ private:
         double snapValue (double attemptedValue, DragMode dragMode) override
         {
             if (owner != nullptr && this == &owner->windowSlider)
-                return (double) FREQTRAudioProcessor::getCanonicalHilbertWindow (
+            {
+                const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow (
                     (int) std::lround (attemptedValue));
+                return (double) juce::jmin (window, owner->getCurrentMaxHilbertWindow());
+            }
 
             return juce::Slider::snapValue (attemptedValue, dragMode);
         }
@@ -254,6 +261,7 @@ private:
     // 2 checkboxes: ALIGN, PDC
     juce::ToggleButton alignButton;
     juce::ToggleButton pdcButton;
+    juce::Label pdcDisplay;
 
     juce::ToggleButton sidechainButton;
     juce::Label sidechainDisplay;
@@ -460,6 +468,9 @@ private:
 
     void updateCombEnabled();
     void updateWindowEnabled();
+    int getCurrentMaxHilbertWindow() const;
+    void syncWindowToMax (bool notifyHost);
+    void updatePdcTooltip();
     void updateSidechainDependentControls();
 
     juce::String getEngineText() const;

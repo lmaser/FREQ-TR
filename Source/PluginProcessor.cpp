@@ -165,6 +165,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	combParam     = apvts.getRawParameterValue (kParamComb);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
 	windowParam  = apvts.getRawParameterValue (kParamWindow);
+	maxWindowParam = apvts.getRawParameterValue (kParamMaxWindow);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
 	harmParam    = apvts.getRawParameterValue (kParamHarm);
 	polarityParam = apvts.getRawParameterValue (kParamPolarity);
@@ -392,8 +393,12 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 
 	hilbertPos = 0;
-	activeHilbertWindow_ = getCanonicalHilbertWindow (
-		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault)));
+	{
+		const int maxWindow = getCanonicalHilbertWindow (
+			(int) std::lround (loadAtomicOrDefault (maxWindowParam, (float) kHilbertMaxWindowDefault)));
+		activeHilbertWindow_ = juce::jmin (getCanonicalHilbertWindow (
+			(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault))), maxWindow);
+	}
 	targetHilbertWindow_ = activeHilbertWindow_;
 	previousHilbertWindow_ = activeHilbertWindow_;
 	hilbertWindowCrossfadeRemaining_ = 0;
@@ -781,8 +786,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		loadAtomicOrDefault (combParam, kCombDefault));
 	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz));
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
-	const int targetHilbertWindow = getCanonicalHilbertWindow (
-		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault)));
+	const int maxHilbertWindow = getCanonicalHilbertWindow (
+		(int) std::lround (loadAtomicOrDefault (maxWindowParam, (float) kHilbertMaxWindowDefault)));
+	const int effectiveMaxDelay = getHilbertDelayForWindow (maxHilbertWindow);
+	const int targetHilbertWindow = juce::jmin (getCanonicalHilbertWindow (
+		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault))), maxHilbertWindow);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float harm   = loadAtomicOrDefault (harmParam, kHarmDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
@@ -836,7 +844,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainTonePoleHz = juce::jmin ((float) currentSampleRate * 0.45f, sidechainToneTarget * 2.30f);
 	const float sidechainToneCoeff = std::exp (-juce::MathConstants<float>::twoPi * sidechainTonePoleHz / (float) currentSampleRate);
 
-	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
+	setLatencySamples (pdcEnabled ? effectiveMaxDelay : 0);
 
 	if (targetHilbertWindow != targetHilbertWindow_)
 	{
@@ -1436,7 +1444,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				}
 			}
 
-			const int pad = kHilbertMaxDelay - half;
+			const int pad = juce::jmax (0, effectiveMaxDelay - half);
 			hilbertWetCompBuf_[lane][0][hilbertPos] = coreL;
 			hilbertWetCompBuf_[lane][1][hilbertPos] = coreR;
 			const int compIdx = (hilbertPos - pad + order) & orderMask;
@@ -1452,8 +1460,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (needsDualWindowRender)
 		{
 			std::array<WetPair, kNumHilbertWindows> wetByWindow {};
-			for (int lane = 0; lane < kNumHilbertWindows; ++lane)
+			const int maxWindowLane = getHilbertWindowLane (maxHilbertWindow);
+			for (int lane = 0; lane <= maxWindowLane; ++lane)
 				wetByWindow[(size_t) lane] = makeWindowWet (kHilbertWindows[lane]);
+			for (int lane = maxWindowLane + 1; lane < kNumHilbertWindows; ++lane)
+				wetByWindow[(size_t) lane] = wetByWindow[(size_t) maxWindowLane];
 
 			auto selectWet = [&] (int window) noexcept -> WetPair
 			{
@@ -1641,7 +1652,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// ── Mix dry/wet with Sum Bus routing ──
 		// Use clean delay buffer for dry reference (feedback-free)
-		const int dryDelayIdx = (hilbertPos - kHilbertMaxDelay + order) & orderMask;
+		const int dryDelayIdx = (hilbertPos - effectiveMaxDelay + order) & orderMask;
 		const float cleanDryL = cleanDelayBufL[(size_t) dryDelayIdx];
 		const float cleanDryR = cleanDelayBufR[(size_t) dryDelayIdx];
 		const float dryRefL = alignEnabled ? cleanDryL : inL;
@@ -1837,6 +1848,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kParamWindow, "Window",
 		juce::NormalisableRange<float> ((float) kHilbertWindowMin, (float) kHilbertWindowMax, 1.0f, 1.0f),
 		(float) kHilbertWindowDefault));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamMaxWindow, "Max Window",
+		juce::NormalisableRange<float> ((float) kHilbertWindowMin, (float) kHilbertWindowMax, 1.0f, 1.0f),
+		(float) kHilbertMaxWindowDefault));
 
 	// Style: 0 = Mono, 1 = Stereo, 2 = Wide, 3 = Dual
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (

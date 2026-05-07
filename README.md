@@ -127,7 +127,7 @@ Blend between AM, ring modulation, and frequency shift:
 
 Selects the FIR Hilbert window used by the frequency-shift side of the engine. It is exposed only for the `RM -> FREQ SHIFT` region because AM and RM do not need Hilbert sideband separation.
 
-The plugin reports and aligns to the maximum Hilbert delay internally, so changing `WIN` does not change the effective host latency. Window changes crossfade between the old and new Hilbert paths to avoid discontinuities.
+The plugin reports and aligns to the selected maximum Hilbert delay internally, so changing `WIN` does not change the effective host latency. Right-click `PDC` to set `MAX WIN`; `WIN` values above that maximum are processed at the selected cap. Window changes crossfade between the old and new Hilbert paths to avoid discontinuities.
 
 ### STYLE
 
@@ -191,11 +191,12 @@ Velocity also affects glide speed:
 
 ### ALIGN
 
-Delays the dry reference to match the maximum Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
+Delays the dry reference to match the selected maximum Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
 
 ### PDC
 
 Reports plugin latency to the host when enabled.
+Right-click `PDC` to set the maximum Hilbert window used for latency/align compensation.
 
 ### HP / LP FILTER
 
@@ -271,7 +272,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 ### DSP Architecture
 
 - Hilbert transform: selectable 127 / 255 / 511 / 1023 / 2047-tap odd-length FIR with Blackman windowing
-- Real path: matched to the maximum Hilbert delay for stable PDC/ALIGN behavior
+- Real path: matched to the selected maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
 - Sidechain carrier: optional external audio carrier with time/tone controls and Hilbert quadrature for frequency-shift operation
 - Harmonic cap: 24 partials max, dynamically limited by Nyquist
@@ -313,6 +314,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added JITTER for deterministic internal movement of frequency, comb, and feedback
 - Added AM -> RM -> FREQ SHIFT engine mapping
 - Added selectable `WIN` control for frequency-shift Hilbert window length
+- Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency
 - Added optional `SIDECHAIN` carrier mode with time/tone prompt
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning

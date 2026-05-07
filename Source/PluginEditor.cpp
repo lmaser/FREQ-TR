@@ -76,6 +76,12 @@ static juce::String formatRetrigTooltip (bool on)
     return juce::String ("RETRIG: ") + (on ? "ON" : "OFF");
 }
 
+static juce::String formatPdcTooltip (bool on, int maxWindow)
+{
+    return juce::String ("PDC ") + (on ? "ON" : "OFF")
+         + " / MAX WIN " + juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow (maxWindow));
+}
+
 static juce::String formatSidechainToneText (float hz)
 {
     const float clamped = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
@@ -970,6 +976,17 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     retrigDisplay.setOpaque (false);
     addAndMakeVisible (retrigDisplay);
 
+    pdcDisplay.setText ("", juce::dontSendNotification);
+    pdcDisplay.setInterceptsMouseClicks (true, false);
+    pdcDisplay.addMouseListener (this, false);
+    pdcDisplay.setTooltip (formatPdcTooltip (
+        pdcButton.getToggleState(),
+        (int) std::lround (audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamMaxWindow)->load())));
+    pdcDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+    pdcDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+    pdcDisplay.setOpaque (false);
+    addAndMakeVisible (pdcDisplay);
+
     sidechainDisplay.setText ("", juce::dontSendNotification);
     sidechainDisplay.setInterceptsMouseClicks (true, false);
     sidechainDisplay.addMouseListener (this, false);
@@ -1044,10 +1061,15 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 
     audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamSync, this);
     audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamSidechain, this);
+    audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamPdc, this);
+    audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamWindow, this);
+    audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamMaxWindow, this);
 
     // Apply initial SYNC state
     if (syncButton.getToggleState())
         updateFreqSliderForSyncMode();
+    syncWindowToMax (true);
+    updatePdcTooltip();
     updateSidechainDependentControls();
 
     juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
@@ -1084,6 +1106,9 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
 
     audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamSync, this);
     audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamSidechain, this);
+    audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamPdc, this);
+    audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamWindow, this);
+    audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamMaxWindow, this);
 
     audioProcessor.setUiUseCustomPalette (useCustomPalette);
     audioProcessor.setUiCrtEnabled (crtEnabled);
@@ -1165,8 +1190,9 @@ void FREQTRAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
         updateWindowEnabled();
     if (slider == &windowSlider)
     {
-        const double snapped = (double) FREQTRAudioProcessor::getCanonicalHilbertWindow (
-            (int) std::lround (windowSlider.getValue()));
+        const double snapped = (double) juce::jmin (
+            FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue())),
+            getCurrentMaxHilbertWindow());
         if (std::abs (windowSlider.getValue() - snapped) > 0.5)
             windowSlider.setValue (snapped, juce::sendNotificationSync);
     }
@@ -1275,6 +1301,34 @@ void FREQTRAudioProcessorEditor::parameterChanged (const juce::String& parameter
         {
             if (safeThis == nullptr) return;
             safeThis->updateSidechainDependentControls();
+        });
+        return;
+    }
+
+    if (parameterID == FREQTRAudioProcessor::kParamPdc)
+    {
+        juce::ignoreUnused (newValue);
+        juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+        juce::MessageManager::callAsync ([safeThis]()
+        {
+            if (safeThis == nullptr) return;
+            safeThis->updatePdcTooltip();
+        });
+        return;
+    }
+
+    if (parameterID == FREQTRAudioProcessor::kParamWindow
+        || parameterID == FREQTRAudioProcessor::kParamMaxWindow)
+    {
+        juce::ignoreUnused (newValue);
+        juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+        juce::MessageManager::callAsync ([safeThis]()
+        {
+            if (safeThis == nullptr) return;
+            safeThis->syncWindowToMax (true);
+            safeThis->updatePdcTooltip();
+            safeThis->refreshLegendTextCache();
+            safeThis->repaint();
         });
         return;
     }
@@ -1569,6 +1623,48 @@ void FREQTRAudioProcessorEditor::updateWindowEnabled()
     repaint();
 }
 
+int FREQTRAudioProcessorEditor::getCurrentMaxHilbertWindow() const
+{
+    return FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamMaxWindow)->load()));
+}
+
+void FREQTRAudioProcessorEditor::syncWindowToMax (bool notifyHost)
+{
+    const int maxWindow = getCurrentMaxHilbertWindow();
+    const double sliderMin = maxWindow > FREQTRAudioProcessor::kHilbertWindowMin
+                           ? (double) FREQTRAudioProcessor::kHilbertWindowMin
+                           : 0.0;
+    windowSlider.setRange (sliderMin,
+                           (double) maxWindow,
+                           1.0);
+
+    const int currentWindow = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamWindow)->load()));
+    const int clampedWindow = juce::jmin (currentWindow, maxWindow);
+
+    if (currentWindow != clampedWindow)
+    {
+        if (notifyHost)
+        {
+            if (auto* p = audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamWindow))
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) clampedWindow));
+        }
+    }
+
+    const int sliderWindow = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue()));
+    if (sliderWindow != clampedWindow)
+        windowSlider.setValue ((double) clampedWindow, juce::dontSendNotification);
+}
+
+void FREQTRAudioProcessorEditor::updatePdcTooltip()
+{
+    const int maxWindow = getCurrentMaxHilbertWindow();
+    const auto tooltip = formatPdcTooltip (pdcButton.getToggleState(), maxWindow);
+    pdcButton.setTooltip (tooltip);
+    pdcDisplay.setTooltip (tooltip);
+}
+
 void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
 {
     if (promptOverlayActive)
@@ -1634,13 +1730,17 @@ juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
 
 juce::String FREQTRAudioProcessorEditor::getWindowText() const
 {
-    const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue()));
+    const int window = juce::jmin (
+        FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue())),
+        getCurrentMaxHilbertWindow());
     return juce::String (window) + " WINDOW";
 }
 
 juce::String FREQTRAudioProcessorEditor::getWindowTextShort() const
 {
-    const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue()));
+    const int window = juce::jmin (
+        FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue())),
+        getCurrentMaxHilbertWindow());
     return juce::String (window) + " WIN";
 }
 
@@ -3349,6 +3449,229 @@ void FREQTRAudioProcessorEditor::scheduleRetrigTipAutoHide()
                     safeThis->tooltipWindow->hideTip();   // mouse left — hide
             }
         });
+}
+
+void FREQTRAudioProcessorEditor::openPdcMaxWindowPrompt()
+{
+    lnf.setScheme (activeScheme);
+    const auto scheme = activeScheme;
+
+    const int currentMaxWindow = getCurrentMaxHilbertWindow();
+    const int currentPluginWindow = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamWindow)->load()));
+
+    auto windowToBar = [] (int window) noexcept
+    {
+        const int lane = FREQTRAudioProcessor::getHilbertWindowLane (window);
+        return (float) lane / (float) (FREQTRAudioProcessor::kNumHilbertWindows - 1);
+    };
+
+    auto barToWindow = [] (float value01) noexcept
+    {
+        const int lane = juce::jlimit (0, FREQTRAudioProcessor::kNumHilbertWindows - 1,
+            (int) std::lround (juce::jlimit (0.0f, 1.0f, value01)
+                * (float) (FREQTRAudioProcessor::kNumHilbertWindows - 1)));
+        return FREQTRAudioProcessor::kHilbertWindows[lane];
+    };
+
+    auto setMaxWindowParam = [this] (int window)
+    {
+        if (auto* p = audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamMaxWindow))
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) FREQTRAudioProcessor::getCanonicalHilbertWindow (window)));
+        syncWindowToMax (true);
+        updatePdcTooltip();
+    };
+
+    auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
+    aw->setLookAndFeel (&lnf);
+    aw->addTextEditor ("maxwin", juce::String (currentMaxWindow), juce::String());
+
+    struct WindowInputFilter : juce::TextEditor::InputFilter
+    {
+        juce::String filterNewText (juce::TextEditor& editor, const juce::String& newText) override
+        {
+            juce::String result;
+            for (auto c : newText)
+            {
+                if (juce::CharacterFunctions::isDigit (c))
+                    result += c;
+                if (result.length() >= 4)
+                    break;
+            }
+
+            juce::String proposed = editor.getText();
+            const int insertPos = editor.getCaretPosition();
+            proposed = proposed.substring (0, insertPos) + result
+                     + proposed.substring (insertPos + editor.getHighlightedText().length());
+
+            if (proposed.length() > 4 || proposed.getIntValue() > FREQTRAudioProcessor::kHilbertWindowMax)
+                return {};
+
+            return result;
+        }
+    };
+
+    struct PromptBar : public juce::Component
+    {
+        FREQScheme colours;
+        float value01 = 1.0f;
+        std::function<void (float)> onValueChanged;
+
+        PromptBar (const FREQScheme& s, float initial01)
+            : colours (s), value01 (juce::jlimit (0.0f, 1.0f, initial01)) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (colours.outline);
+            g.drawRect (r, 4.0f);
+            auto inner = r.reduced (7.0f);
+            g.setColour (colours.bg);
+            g.fillRect (inner);
+            g.setColour (colours.fg);
+            g.fillRect (inner.withWidth (inner.getWidth() * value01));
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override { updateFromMouse (e); }
+        void mouseDrag (const juce::MouseEvent& e) override { updateFromMouse (e); }
+        void mouseDoubleClick (const juce::MouseEvent&) override { setValue (1.0f); }
+
+        void setValue (float newValue01)
+        {
+            value01 = juce::jlimit (0.0f, 1.0f, newValue01);
+            repaint();
+            if (onValueChanged)
+                onValueChanged (value01);
+        }
+
+    private:
+        void updateFromMouse (const juce::MouseEvent& e)
+        {
+            const float innerW = (float) getWidth() - 14.0f;
+            const float next = innerW > 0.0f ? ((float) e.x - 7.0f) / innerW : 0.0f;
+            setValue (next);
+        }
+    };
+
+    const auto& f = kBoldFont40();
+    auto* nameLabel = new juce::Label ("maxwin_label", "MAX WIN");
+    nameLabel->setJustificationType (juce::Justification::centredLeft);
+    nameLabel->setBorderSize (juce::BorderSize<int> (0));
+    nameLabel->setFont (f);
+    applyLabelTextColour (*nameLabel, scheme.text);
+    aw->addAndMakeVisible (nameLabel);
+
+    auto* bar = new PromptBar (scheme, windowToBar (currentMaxWindow));
+    aw->addAndMakeVisible (bar);
+
+    if (auto* te = aw->getTextEditor ("maxwin"))
+    {
+        te->setFont (f);
+        te->applyFontToAllText (f);
+        te->setInputFilter (new WindowInputFilter(), true);
+    }
+
+    auto syncing = std::make_shared<bool> (false);
+    auto layoutRows = [aw, nameLabel, bar]()
+    {
+        auto* te = aw->getTextEditor ("maxwin");
+        if (te == nullptr || nameLabel == nullptr || bar == nullptr)
+            return;
+
+        const int buttonsTop = getAlertButtonsTop (*aw);
+        auto er = te->getBounds();
+        er.setHeight ((int) (te->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
+        const int rowH = er.getHeight();
+        const int barH = juce::jmax (12, rowH / 2);
+        const int barGap = juce::jmax (4, rowH / 4);
+        const int totalH = rowH + barGap + barH;
+        const int y = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - totalH) / 2);
+        const int contentPad = kPromptInnerMargin;
+        const int contentW = aw->getWidth() - contentPad * 2;
+        const int labelW = stringWidth (nameLabel->getFont(), nameLabel->getText()) + 8;
+        const int textW = juce::jmax (stringWidth (te->getFont(), "2048"), stringWidth (te->getFont(), te->getText()));
+        const int editorW = juce::jmax (40, textW + 10);
+        const int gap = juce::jmax (8, stringWidth (te->getFont(), " "));
+        const int visualW = labelW + gap + editorW;
+        const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
+
+        nameLabel->setBounds (blockLeft, y, labelW, rowH);
+        te->setBounds (blockLeft + labelW + gap, y, editorW, rowH);
+        bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
+    };
+
+    bar->onValueChanged = [aw, barToWindow, setMaxWindowParam, syncing, layoutRows] (float value01)
+    {
+        if (*syncing)
+            return;
+
+        *syncing = true;
+        const int window = barToWindow (value01);
+        if (auto* te = aw->getTextEditor ("maxwin"))
+        {
+            te->setText (juce::String (window), juce::sendNotification);
+            te->selectAll();
+        }
+        *syncing = false;
+        setMaxWindowParam (window);
+        layoutRows();
+    };
+
+    if (auto* te = aw->getTextEditor ("maxwin"))
+        te->onTextChange = [aw, bar, windowToBar, setMaxWindowParam, syncing, layoutRows]()
+        {
+            if (*syncing)
+                return;
+
+            *syncing = true;
+            int window = FREQTRAudioProcessor::kHilbertWindowDefault;
+            if (auto* editor = aw->getTextEditor ("maxwin"))
+                window = FREQTRAudioProcessor::getCanonicalHilbertWindow (editor->getText().getIntValue());
+            bar->setValue (windowToBar (window));
+            *syncing = false;
+            setMaxWindowParam (window);
+            layoutRows();
+        };
+
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    applyPromptShellSize (*aw);
+    layoutAlertWindowButtons (*aw);
+    preparePromptTextEditor (*aw, "maxwin", scheme.bg, scheme.text, scheme.fg, f, false);
+    layoutRows();
+    styleAlertButtons (*aw, lnf);
+
+    setPromptOverlayActive (true);
+    juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+    fitAlertWindowToEditor (*aw, safeThis.getComponent(), [layoutRows] (juce::AlertWindow& a)
+    {
+        juce::ignoreUnused (a);
+        layoutAlertWindowButtons (a);
+        layoutRows();
+    });
+    embedAlertWindowInOverlay (safeThis.getComponent(), aw);
+
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create (
+            [safeThis, aw, savedMaxWindow = currentMaxWindow, savedPluginWindow = currentPluginWindow] (int result) mutable
+        {
+            std::unique_ptr<juce::AlertWindow> killer (aw);
+            if (safeThis != nullptr)
+                safeThis->setPromptOverlayActive (false);
+            if (safeThis == nullptr)
+                return;
+
+            if (result != 1)
+            {
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamMaxWindow))
+                    p->setValueNotifyingHost (p->convertTo0to1 ((float) savedMaxWindow));
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamWindow))
+                    p->setValueNotifyingHost (p->convertTo0to1 ((float) juce::jmin (savedPluginWindow, savedMaxWindow)));
+            }
+            safeThis->syncWindowToMax (true);
+            safeThis->updatePdcTooltip();
+        }),
+        false);
 }
 
 void FREQTRAudioProcessorEditor::openSidechainPrompt()
@@ -5194,9 +5517,14 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     }
 
     // PDC label click → toggle
-    if (pdcButton.isVisible() && getPdcLabelArea().contains (pt))
+    if (pdcButton.isVisible()
+        && (getPdcLabelArea().contains (pt) || pdcDisplay.getBounds().contains (pt)))
     {
-        pdcButton.setToggleState (! pdcButton.getToggleState(), juce::sendNotificationSync);
+        if (e.mods.isPopupMenu())
+            openPdcMaxWindowPrompt();
+        else
+            pdcButton.setToggleState (! pdcButton.getToggleState(), juce::sendNotificationSync);
+        updatePdcTooltip();
         return;
     }
 
@@ -6071,6 +6399,7 @@ void FREQTRAudioProcessorEditor::resized()
         midiChannelDisplay.setVisible (false);
         alignButton.setVisible (false);
         pdcButton.setVisible (false);
+        pdcDisplay.setVisible (false);
         retrigDisplay.setVisible (false);
         sidechainButton.setVisible (true);
         sidechainDisplay.setVisible (true);
@@ -6134,6 +6463,7 @@ void FREQTRAudioProcessorEditor::resized()
         midiChannelDisplay.setVisible (true);
         alignButton.setVisible (true);
         pdcButton.setVisible (true);
+        pdcDisplay.setVisible (true);
         retrigDisplay.setVisible (true);
         sidechainButton.setVisible (false);
         sidechainDisplay.setVisible (false);
@@ -6192,6 +6522,7 @@ void FREQTRAudioProcessorEditor::resized()
         midiChannelDisplay.setBounds (midiLabelRect);
     }
 
+    pdcDisplay.setBounds (pdcButton.getBounds().getUnion (getPdcLabelArea()));
     sidechainDisplay.setBounds (sidechainButton.getBounds().getUnion (getSidechainLabelArea()));
     updateSidechainDependentControls();
 

@@ -119,6 +119,15 @@ private:
             return t;
         }
 
+        double snapValue (double attemptedValue, DragMode dragMode) override
+        {
+            if (owner != nullptr && this == &owner->windowSlider)
+                return (double) FREQTRAudioProcessor::getCanonicalHilbertWindow (
+                    (int) std::lround (attemptedValue));
+
+            return juce::Slider::snapValue (attemptedValue, dragMode);
+        }
+
     private:
         FREQTRAudioProcessorEditor* owner = nullptr;
         bool allowNumericPopup = true;

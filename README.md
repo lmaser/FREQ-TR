@@ -36,6 +36,7 @@ The value column reflects the current context:
 - `MOD`: frequency multiplier
 - `FEEDBACK`: percent
 - `COMB`: hertz
+- `JITTER`: percent
 - `ENGINE`: percent blend
 - `STYLE`: MONO / STEREO / WIDE / DUAL
 - `HARM`: percent harmonic density
@@ -101,6 +102,15 @@ The feedback path includes:
 ### COMB (5-750 Hz)
 
 Resonant frequency of the feedback delay line. Higher values shorten the feedback delay and raise the comb resonance.
+
+### JITTER (0-100%)
+
+Internal motion for the frequency shifter and feedback network. It uses the same time-equivalent jitter model as the other TR modulation plugins:
+- `FREQ` is modulated from its oscillator period
+- `COMB` is modulated as feedback delay time
+- `FEEDBACK` is modulated multiplicatively, without generating feedback from silence
+
+At 0% the jitter path is bypassed. In stereo modes, deterministic lanes keep the movement repeatable while avoiding identical left/right modulation.
 
 ### ENGINE (0-100%)
 
@@ -238,6 +248,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
 - Feedback: comb-tuned delay line with DC blocking and low-pass conditioning
+- Jitter: time-equivalent smooth S&H / flutter / tone modulation applied to frequency, comb delay, and feedback magnitude
 - Safety: final hard safety clip at very high level only
 
 ### MIDI
@@ -269,6 +280,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added RMS-normalized harmonic oscillator behavior
 - Added TILT EQ
 - Added CHAOS F / CHAOS D
+- Added JITTER for deterministic internal movement of frequency, comb, and feedback
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

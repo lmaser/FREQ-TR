@@ -492,7 +492,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 	chaosDelaySmoothStep_        = 1.0f - std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
-	jitterParamSmoothCoeff_      = std::exp (-1.0f / ((float) currentSampleRate * 0.025f));
+	jitterParamSmoothCoeff_      = std::exp (-1.0f / ((float) currentSampleRate * (float) kJitterSmoothingSeconds));
 
 	// Limiter state reset
 	limEnv1_[0] = limEnv1_[1] = kLimFloor;
@@ -510,50 +510,29 @@ void FREQTRAudioProcessor::resetJitterState() noexcept
 	jitterActive_ = false;
 	jitterStereo_ = false;
 	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+	jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
+	jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 	jitterFeedbackOut_ = 0.0f;
+	jitterFeedbackDepth_ = 0.0f;
 	jitterCombOut_ = 0.0f;
-
-	auto initLane = [] (float& prev, float& curr, float& next, float& phase,
-	                    float& driftPhase, float& driftFreqHz, float& out,
-	                    juce::Random& rng, juce::int64 seed) noexcept
-	{
-		rng.setSeed (seed);
-		prev = rng.nextFloat() * 2.0f - 1.0f;
-		curr = prev;
-		next = rng.nextFloat() * 2.0f - 1.0f;
-		phase = rng.nextFloat();
-		driftPhase = rng.nextFloat();
-		driftFreqHz = 0.0f;
-		out = 0.0f;
-	};
+	jitterCombDepthOct_ = 0.0f;
 
 	for (int ch = 0; ch < 2; ++ch)
 	{
 		const juce::int64 seedBase = (ch == 0) ? 0x465245514a495431ll : 0x465245514a495432ll;
-		initLane (jitterFreqPrev_[ch], jitterFreqCurr_[ch], jitterFreqNext_[ch],
-		          jitterFreqPhase_[ch], jitterFreqDriftPhase_[ch], jitterFreqDriftFreqHz_[ch],
-		          jitterFreqOut_[ch], jitterFreqRng_[ch], seedBase + 0x11ll);
-		initLane (jitterFreqFastPrev_[ch], jitterFreqFastCurr_[ch], jitterFreqFastNext_[ch],
-		          jitterFreqFastPhase_[ch], jitterFreqFastDriftPhase_[ch], jitterFreqFastDriftFreqHz_[ch],
-		          jitterFreqOut_[ch], jitterFreqFastRng_[ch], seedBase + 0x2fll);
+		jitterFreqMod_[ch].reset (seedBase, ch == 0 ? 0.113f : 0.617f);
 	}
 
-	initLane (jitterFeedbackPrev_, jitterFeedbackCurr_, jitterFeedbackNext_,
-	          jitterFeedbackPhase_, jitterFeedbackDriftPhase_, jitterFeedbackDriftFreqHz_,
-	          jitterFeedbackOut_, jitterFeedbackRng_, 0x465245514a495446ll);
-	initLane (jitterFeedbackFastPrev_, jitterFeedbackFastCurr_, jitterFeedbackFastNext_,
-	          jitterFeedbackFastPhase_, jitterFeedbackFastDriftPhase_, jitterFeedbackFastDriftFreqHz_,
-	          jitterFeedbackOut_, jitterFeedbackFastRng_, 0x465245514a495447ll);
-	initLane (jitterCombPrev_, jitterCombCurr_, jitterCombNext_,
-	          jitterCombPhase_, jitterCombDriftPhase_, jitterCombDriftFreqHz_,
-	          jitterCombOut_, jitterCombRng_, 0x465245514a495443ll);
-	initLane (jitterCombFastPrev_, jitterCombFastCurr_, jitterCombFastNext_,
-	          jitterCombFastPhase_, jitterCombFastDriftPhase_, jitterCombFastDriftFreqHz_,
-	          jitterCombOut_, jitterCombFastRng_, 0x465245514a495448ll);
+	jitterFeedbackMod_.reset (0x465245514a495446ll, 0.381f);
+	jitterCombMod_.reset (0x465245514a495443ll, 0.827f);
 
 	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+	jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
+	jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 	jitterFeedbackOut_ = 0.0f;
+	jitterFeedbackDepth_ = 0.0f;
 	jitterCombOut_ = 0.0f;
+	jitterCombDepthOct_ = 0.0f;
 }
 
 void FREQTRAudioProcessor::updateFilterCoeffs (bool forceHp, bool forceLp)
@@ -982,12 +961,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		smoothedPan = paramCoeff * smoothedPan + (1.0f - paramCoeff) * targetPan;
 		smoothedLimThreshold = paramCoeff * smoothedLimThreshold + (1.0f - paramCoeff) * targetLimThreshLin;
 
-		if (jitterActive_)
-			advanceJitter();
-
 		const float rFreqRatio = (style == 3) ? 0.5f : 1.0f;
 		const float baseFreqL = smoothedFreq;
 		const float baseFreqR = smoothedFreq * rFreqRatio;
+
+		if (jitterActive_)
+			advanceJitter (calcJitterFrequencyDelaySamples (baseFreqL),
+			               calcJitterFrequencyDelaySamples (baseFreqR),
+			               smoothedComb_);
+
 		const float jitteredFreqL = baseFreqL * getJitterFreqMultiplier (0);
 		const float jitteredFreqR = baseFreqR * getJitterFreqMultiplier (1);
 

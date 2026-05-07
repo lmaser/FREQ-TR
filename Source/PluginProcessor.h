@@ -555,6 +555,81 @@ private:
 	float chaosDelaySmoothStep_          = 0.001f;
 
 	// JIT: internal frequency/feedback/comb instability, independent from CHS D.
+	static constexpr double kJitterSmoothingSeconds = 0.0325;
+	static constexpr float kJitterEpsilon = 0.000001f;
+	static constexpr float kJitterMinDelaySamples = 2.0f;
+	static constexpr float kJitterMinDelayMs = 0.05f;
+	static constexpr float kJitterShortRefMs = 8.0f;
+	static constexpr float kJitterMidRefMs = 500.0f;
+	static constexpr float kJitterLongRefMs = 4000.0f;
+	static constexpr float kJitterLongnessRefMs = 250.0f;
+	static constexpr float kJitterHighStart = 0.55f;
+	static constexpr float kJitterHighRange = 0.45f;
+	static constexpr float kJitterExtremeStart = 0.82f;
+	static constexpr float kJitterExtremeRange = 0.18f;
+	static constexpr float kJitterDriftRateMinHz = 0.03f;
+	static constexpr float kJitterDriftRateMaxHz = 2.0f;
+	static constexpr float kJitterDriftRateBaseHz = 0.08f;
+	static constexpr float kJitterDriftRateTopHz = 1.20f;
+	static constexpr float kJitterDriftLongnessDamping = 0.65f;
+	static constexpr float kJitterDriftShortnessBoost = 0.10f;
+	static constexpr float kJitterFlutterRateMinHz = 2.0f;
+	static constexpr float kJitterFlutterRateMaxHz = 7000.0f;
+	static constexpr float kJitterFlutterRateBaseHz = 4.0f;
+	static constexpr float kJitterFlutterRateTopHz = 130.0f;
+	static constexpr float kJitterFlutterRefMs = 250.0f;
+	static constexpr float kJitterFlutterDelayPower = 0.90f;
+	static constexpr float kJitterToneStart = 0.18f;
+	static constexpr float kJitterToneRange = 0.82f;
+	static constexpr float kJitterToneRateSmoothTauSeconds = 0.006f;
+	static constexpr float kJitterToneCeilHz = 12000.0f;
+	static constexpr float kJitterToneCeilSampleRateRatio = 0.22f;
+	static constexpr float kJitterToneLiftBase = 4.0f;
+	static constexpr float kJitterToneLiftAmount = 190.0f;
+	static constexpr float kJitterToneLiftHigh = 60.0f;
+	static constexpr float kJitterToneLiftExtreme = 90.0f;
+	static constexpr float kJitterToneShortnessPower = 0.70f;
+	static constexpr float kJitterToneRightHarmonic = 1.618f;
+	static constexpr float kJitterToneWeightShortnessPower = 0.55f;
+	static constexpr float kJitterToneWeightBase = 0.35f;
+	static constexpr float kJitterToneWeightAmount = 0.55f;
+	static constexpr float kJitterToneWeightMax = 0.78f;
+	static constexpr float kJitterToneFundamentalWeight = 0.72f;
+	static constexpr float kJitterToneSecondWeight = 0.20f;
+	static constexpr float kJitterToneThirdWeight = 0.08f;
+	static constexpr float kJitterToneSecondPhaseL = 0.73f;
+	static constexpr float kJitterToneSecondPhaseR = 1.37f;
+	static constexpr float kJitterToneThirdPhaseL = 1.91f;
+	static constexpr float kJitterToneThirdPhaseR = 2.47f;
+	static constexpr float kJitterDriftWeightMin = 0.18f;
+	static constexpr float kJitterDriftWeightMax = 0.72f;
+	static constexpr float kJitterDriftWeightBase = 0.42f;
+	static constexpr float kJitterDriftWeightLongness = 0.30f;
+	static constexpr float kJitterDriftWeightShortness = 0.14f;
+	static constexpr float kJitterFlutterWeightMin = 0.35f;
+	static constexpr float kJitterFlutterWeightMax = 0.95f;
+	static constexpr float kJitterFlutterWeightBase = 0.45f;
+	static constexpr float kJitterFlutterWeightShortness = 0.38f;
+	static constexpr float kJitterFlutterWeightHigh = 0.12f;
+	static constexpr float kJitterOutputLimit = 1.25f;
+	static constexpr float kJitterDepthRatio = 0.055f;
+	static constexpr float kJitterDepthPower = 1.05f;
+	static constexpr float kJitterMaxDepthRatio = 0.12f;
+	static constexpr float kJitterMinDepthSeconds = 1.0e-7f;
+	static constexpr float kJitterMinEngineRateHz = 0.01f;
+	static constexpr float kJitterFeedbackDepthBase = 0.010f;
+	static constexpr float kJitterFeedbackDepthRange = 0.055f;
+	static constexpr float kJitterFeedbackShortBoost = 0.20f;
+	static constexpr float kJitterFeedbackDepthScale = 0.60f;
+	static constexpr float kJitterFeedbackSlowRateScale = 0.80f;
+	static constexpr float kJitterFeedbackFastRateScale = 0.55f;
+	static constexpr float kJitterFeedbackSlowWeight = 0.62f;
+	static constexpr float kJitterFeedbackFastWeightBase = 0.24f;
+	static constexpr float kJitterFeedbackFastShortnessWeight = 0.28f;
+	static constexpr float kJitterFeedbackOutputLimit = 1.0f;
+	static constexpr float kJitterFrequencyDepthScale = 2.0f;
+	static constexpr float kJitterSyncPhaseDepthScale = 0.028f;
+
 	float jitterTargetNorm_              = 0.0f;
 	float jitterAmountSmoothed_          = 0.0f;
 	float jitterParamSmoothCoeff_        = 0.999f;
@@ -562,53 +637,55 @@ private:
 	bool  jitterActive_                  = false;
 	bool  jitterStereo_                  = false;
 
-	float jitterFreqPrev_[2]             = {};
-	float jitterFreqCurr_[2]             = {};
-	float jitterFreqNext_[2]             = {};
-	float jitterFreqPhase_[2]            = {};
-	float jitterFreqDriftPhase_[2]       = {};
-	float jitterFreqDriftFreqHz_[2]      = {};
-	float jitterFreqFastPrev_[2]         = {};
-	float jitterFreqFastCurr_[2]         = {};
-	float jitterFreqFastNext_[2]         = {};
-	float jitterFreqFastPhase_[2]        = {};
-	float jitterFreqFastDriftPhase_[2]   = {};
-	float jitterFreqFastDriftFreqHz_[2]  = {};
 	float jitterFreqOut_[2]              = {};
-	juce::Random jitterFreqRng_[2];
-	juce::Random jitterFreqFastRng_[2];
-
-	float jitterFeedbackPrev_            = 0.0f;
-	float jitterFeedbackCurr_            = 0.0f;
-	float jitterFeedbackNext_            = 0.0f;
-	float jitterFeedbackPhase_           = 0.0f;
-	float jitterFeedbackDriftPhase_      = 0.0f;
-	float jitterFeedbackDriftFreqHz_     = 0.0f;
-	float jitterFeedbackFastPrev_        = 0.0f;
-	float jitterFeedbackFastCurr_        = 0.0f;
-	float jitterFeedbackFastNext_        = 0.0f;
-	float jitterFeedbackFastPhase_       = 0.0f;
-	float jitterFeedbackFastDriftPhase_  = 0.0f;
-	float jitterFeedbackFastDriftFreqHz_ = 0.0f;
+	float jitterFreqDepthOct_[2]         = {};
+	float jitterSyncPhaseDepth_[2]       = {};
 	float jitterFeedbackOut_             = 0.0f;
-	juce::Random jitterFeedbackRng_;
-	juce::Random jitterFeedbackFastRng_;
-
-	float jitterCombPrev_                = 0.0f;
-	float jitterCombCurr_                = 0.0f;
-	float jitterCombNext_                = 0.0f;
-	float jitterCombPhase_               = 0.0f;
-	float jitterCombDriftPhase_          = 0.0f;
-	float jitterCombDriftFreqHz_         = 0.0f;
-	float jitterCombFastPrev_            = 0.0f;
-	float jitterCombFastCurr_            = 0.0f;
-	float jitterCombFastNext_            = 0.0f;
-	float jitterCombFastPhase_           = 0.0f;
-	float jitterCombFastDriftPhase_      = 0.0f;
-	float jitterCombFastDriftFreqHz_     = 0.0f;
+	float jitterFeedbackDepth_           = 0.0f;
 	float jitterCombOut_                 = 0.0f;
-	juce::Random jitterCombRng_;
-	juce::Random jitterCombFastRng_;
+	float jitterCombDepthOct_            = 0.0f;
+
+	struct JitterModulator
+	{
+		float slowPrev = 0.0f;
+		float slowCurr = 0.0f;
+		float slowNext = 0.0f;
+		float slowPhase = 0.0f;
+		float slowDriftPhase = 0.0f;
+		float slowDriftFreqHz = 0.0f;
+		juce::Random slowRng;
+
+		float fastPrev = 0.0f;
+		float fastCurr = 0.0f;
+		float fastNext = 0.0f;
+		float fastPhase = 0.0f;
+		float fastDriftPhase = 0.0f;
+		float fastDriftFreqHz = 0.0f;
+		juce::Random fastRng;
+
+		float tonePhase = 0.0f;
+		float toneRateHz = 0.0f;
+
+		void reset (juce::int64 seed, float initialTonePhase) noexcept
+		{
+			slowPrev = slowCurr = 0.0f;
+			slowPhase = slowDriftPhase = slowDriftFreqHz = 0.0f;
+			slowRng.setSeed (seed ^ 0x5a17d15cll);
+			slowNext = slowRng.nextFloat() * 2.0f - 1.0f;
+
+			fastPrev = fastCurr = 0.0f;
+			fastPhase = fastDriftPhase = fastDriftFreqHz = 0.0f;
+			fastRng.setSeed (seed ^ 0x2f05a11ll);
+			fastNext = fastRng.nextFloat() * 2.0f - 1.0f;
+
+			tonePhase = initialTonePhase;
+			toneRateHz = 0.0f;
+		}
+	};
+
+	JitterModulator jitterFreqMod_[2];
+	JitterModulator jitterFeedbackMod_;
+	JitterModulator jitterCombMod_;
 
 	void resetJitterState() noexcept;
 
@@ -657,7 +734,144 @@ private:
 		return t * t * (3.0f - 2.0f * t);
 	}
 
-	inline void advanceJitter() noexcept
+	static float jitterShortness (float delayMs) noexcept
+	{
+		return juce::jlimit (0.0f, 1.0f,
+			std::log2 (kJitterMidRefMs / delayMs) / std::log2 (kJitterMidRefMs / kJitterShortRefMs));
+	}
+
+	static float jitterLongness (float delayMs) noexcept
+	{
+		return juce::jlimit (0.0f, 1.0f,
+			std::log2 (delayMs / kJitterLongnessRefMs) / std::log2 (kJitterLongRefMs / kJitterLongnessRefMs));
+	}
+
+	struct JitterMetrics
+	{
+		float amountMapped = 0.0f;
+		float delayMs = 1.0f;
+		float shortness = 0.0f;
+		float longness = 0.0f;
+		float driftRateHz = 0.1f;
+		float flutterRateHz = 4.0f;
+		float toneRateHz = 0.0f;
+		float driftWeight = 0.4f;
+		float flutterWeight = 0.5f;
+		float toneWeight = 0.0f;
+		float delayDepthOct = 0.0f;
+		float feedbackDepth = 0.0f;
+	};
+
+	inline JitterMetrics makeJitterMetrics (float baseDelaySamples, float amount, float sr, int laneIndex) const noexcept
+	{
+		JitterMetrics m;
+		m.amountMapped = juce::jlimit (0.0f, 1.0f, amount);
+
+		const float safeSr = juce::jmax (1.0f, sr);
+		m.delayMs = juce::jmax (kJitterMinDelayMs,
+			juce::jmax (kJitterMinDelaySamples, baseDelaySamples) * 1000.0f / safeSr);
+		const float delaySeconds = m.delayMs * 0.001f;
+		const float delayHz = 1.0f / delaySeconds;
+
+		m.shortness = jitterShortness (m.delayMs);
+		m.longness = jitterLongness (m.delayMs);
+
+		const float high = smoothStep01 ((m.amountMapped - kJitterHighStart) / kJitterHighRange);
+		const float extreme = smoothStep01 ((m.amountMapped - kJitterExtremeStart) / kJitterExtremeRange);
+
+		m.driftRateHz = (kJitterDriftRateBaseHz + (kJitterDriftRateTopHz - kJitterDriftRateBaseHz) * m.amountMapped)
+		              * (1.0f - kJitterDriftLongnessDamping * m.longness)
+		              * (1.0f + kJitterDriftShortnessBoost * m.shortness);
+		m.driftRateHz = juce::jlimit (kJitterDriftRateMinHz, kJitterDriftRateMaxHz, m.driftRateHz);
+
+		m.flutterRateHz = (kJitterFlutterRateBaseHz + (kJitterFlutterRateTopHz - kJitterFlutterRateBaseHz) * m.amountMapped)
+		                * std::pow (kJitterFlutterRefMs / m.delayMs, kJitterFlutterDelayPower);
+		m.flutterRateHz = juce::jlimit (kJitterFlutterRateMinHz, kJitterFlutterRateMaxHz, m.flutterRateHz);
+
+		const float toneAmount = smoothStep01 ((m.amountMapped - kJitterToneStart) / kJitterToneRange);
+		const float toneLift = kJitterToneLiftBase + kJitterToneLiftAmount * m.amountMapped
+		                      + high * kJitterToneLiftHigh + extreme * kJitterToneLiftExtreme;
+		const float toneShort = std::pow (m.shortness, kJitterToneShortnessPower);
+		const float harmonic = (laneIndex & 1) == 0 ? 1.0f : kJitterToneRightHarmonic;
+		const float toneCeilHz = juce::jmin (kJitterToneCeilHz, safeSr * kJitterToneCeilSampleRateRatio);
+		m.toneRateHz = juce::jlimit (0.0f, toneCeilHz, delayHz * toneLift * toneShort * harmonic);
+
+		m.driftWeight = juce::jlimit (kJitterDriftWeightMin, kJitterDriftWeightMax,
+			kJitterDriftWeightBase + kJitterDriftWeightLongness * m.longness
+			- kJitterDriftWeightShortness * m.shortness);
+		m.flutterWeight = juce::jlimit (kJitterFlutterWeightMin, kJitterFlutterWeightMax,
+			kJitterFlutterWeightBase + kJitterFlutterWeightShortness * m.shortness
+			+ kJitterFlutterWeightHigh * high);
+		m.toneWeight = toneAmount * std::pow (m.shortness, kJitterToneWeightShortnessPower)
+		             * (kJitterToneWeightBase + kJitterToneWeightAmount * m.amountMapped);
+		m.toneWeight = juce::jlimit (0.0f, kJitterToneWeightMax, m.toneWeight);
+
+		const float targetDepthRatio = kJitterDepthRatio * std::pow (m.amountMapped, kJitterDepthPower);
+		const float maxDepthSeconds = delaySeconds * kJitterMaxDepthRatio;
+		const float depthSeconds = juce::jlimit (kJitterMinDepthSeconds, maxDepthSeconds,
+			delaySeconds * targetDepthRatio);
+		m.delayDepthOct = std::log2 ((delaySeconds + depthSeconds) / delaySeconds);
+
+		m.feedbackDepth = (kJitterFeedbackDepthBase + kJitterFeedbackDepthRange * m.amountMapped) * m.amountMapped
+		                * (1.0f + kJitterFeedbackShortBoost * m.shortness);
+		return m;
+	}
+
+	inline float calcJitterFrequencyDelaySamples (float freqHz) const noexcept
+	{
+		const float sr = juce::jmax (1.0f, (float) currentSampleRate);
+		const float hz = juce::jmax (0.01f, std::abs (freqHz));
+		return juce::jmax (kJitterMinDelaySamples, sr / hz);
+	}
+
+	inline float advanceJitterModulator (JitterModulator& mod, const JitterMetrics& metrics,
+	                                     float sr, int laneIndex) noexcept
+	{
+		float slowOut = 0.0f;
+		float fastOut = 0.0f;
+		const float slowPeriod = sr / juce::jmax (kJitterMinEngineRateHz, metrics.driftRateHz);
+		const float fastPeriod = sr / juce::jmax (kJitterMinEngineRateHz, metrics.flutterRateHz);
+
+		advanceChaosEngine (mod.slowPrev, mod.slowCurr, mod.slowNext,
+		                    mod.slowPhase, mod.slowDriftPhase, mod.slowDriftFreqHz,
+		                    slowOut, mod.slowRng, slowPeriod, metrics.amountMapped, sr);
+		advanceChaosEngine (mod.fastPrev, mod.fastCurr, mod.fastNext,
+		                    mod.fastPhase, mod.fastDriftPhase, mod.fastDriftFreqHz,
+		                    fastOut, mod.fastRng, fastPeriod, metrics.amountMapped, sr);
+
+		float toneOut = 0.0f;
+		if (metrics.toneWeight > kJitterEpsilon && metrics.toneRateHz > 0.0f)
+		{
+			const float toneRateSmooth = std::exp (-1.0f / (sr * kJitterToneRateSmoothTauSeconds));
+			if (mod.toneRateHz <= 0.0f)
+				mod.toneRateHz = metrics.toneRateHz;
+			else
+				mod.toneRateHz = mod.toneRateHz * toneRateSmooth
+				               + metrics.toneRateHz * (1.0f - toneRateSmooth);
+
+			mod.tonePhase += mod.toneRateHz / sr;
+			mod.tonePhase -= std::floor (mod.tonePhase);
+
+			const bool oddLane = (laneIndex & 1) != 0;
+			const float phase = mod.tonePhase * kTwoPi;
+			toneOut = std::sin (phase) * kJitterToneFundamentalWeight
+			        + std::sin (phase * 2.0f + (oddLane ? kJitterToneSecondPhaseR : kJitterToneSecondPhaseL))
+			          * kJitterToneSecondWeight
+			        + std::sin (phase * 3.0f + (oddLane ? kJitterToneThirdPhaseR : kJitterToneThirdPhaseL))
+			          * kJitterToneThirdWeight;
+		}
+		else
+		{
+			mod.toneRateHz = 0.0f;
+		}
+
+		const float combined = slowOut * metrics.driftWeight
+		                     + fastOut * metrics.flutterWeight
+		                     + toneOut * metrics.toneWeight;
+		return juce::jlimit (-kJitterOutputLimit, kJitterOutputLimit, combined);
+	}
+
+	inline void advanceJitter (float freqDelaySamplesL, float freqDelaySamplesR, float combDelaySamples) noexcept
 	{
 		const float sr = juce::jmax (1.0f, (float) currentSampleRate);
 		const float smoothStep = 1.0f - jitterParamSmoothCoeff_;
@@ -678,57 +892,63 @@ private:
 			jitterParamSmoothReady_ = false;
 			jitterActive_ = false;
 			jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
+			jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
+			jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 			jitterFeedbackOut_ = 0.0f;
+			jitterFeedbackDepth_ = 0.0f;
 			jitterCombOut_ = 0.0f;
+			jitterCombDepthOct_ = 0.0f;
 			return;
 		}
 
 		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
-		const float high = smoothStep01 ((amt - 0.60f) / 0.40f);
-		const float fastMix = smoothStep01 ((amt - 0.70f) / 0.30f) * 0.36f;
-		const float slowRateHz = 0.15f + amt * 0.55f + high * 1.65f;
-		const float fastRateHz = 3.0f + amt * amt * 24.0f + high * 28.0f;
-		const float slowPeriod = sr / juce::jmax (0.01f, slowRateHz);
-		const float fastPeriod = sr / juce::jmax (0.01f, fastRateHz);
 		const int nCh = jitterStereo_ ? 2 : 1;
+		const float freqDelaySamples[2] =
+		{
+			juce::jmax (kJitterMinDelaySamples, freqDelaySamplesL),
+			juce::jmax (kJitterMinDelaySamples, freqDelaySamplesR)
+		};
 
 		for (int ch = 0; ch < nCh; ++ch)
 		{
-			float slowOut = 0.0f;
-			float fastOut = 0.0f;
-			advanceChaosEngine (jitterFreqPrev_[ch], jitterFreqCurr_[ch], jitterFreqNext_[ch],
-			                    jitterFreqPhase_[ch], jitterFreqDriftPhase_[ch],
-			                    jitterFreqDriftFreqHz_[ch], slowOut, jitterFreqRng_[ch],
-			                    slowPeriod, amt, sr);
-			advanceChaosEngine (jitterFreqFastPrev_[ch], jitterFreqFastCurr_[ch], jitterFreqFastNext_[ch],
-			                    jitterFreqFastPhase_[ch], jitterFreqFastDriftPhase_[ch],
-			                    jitterFreqFastDriftFreqHz_[ch], fastOut, jitterFreqFastRng_[ch],
-			                    fastPeriod, amt, sr);
-			jitterFreqOut_[ch] = juce::jlimit (-1.15f, 1.15f, slowOut * (1.0f - fastMix) + fastOut * fastMix);
+			const JitterMetrics metrics = makeJitterMetrics (freqDelaySamples[ch], amt, sr, ch);
+			jitterFreqOut_[ch] = advanceJitterModulator (jitterFreqMod_[ch], metrics, sr, ch);
+			jitterFreqDepthOct_[ch] = metrics.delayDepthOct * kJitterFrequencyDepthScale;
+			jitterSyncPhaseDepth_[ch] = metrics.delayDepthOct * kJitterSyncPhaseDepthScale;
 		}
 
 		if (! jitterStereo_)
+		{
 			jitterFreqOut_[1] = jitterFreqOut_[0];
+			jitterFreqDepthOct_[1] = jitterFreqDepthOct_[0];
+			jitterSyncPhaseDepth_[1] = jitterSyncPhaseDepth_[0];
+		}
 
+		const float safeCombDelay = juce::jmax (kJitterMinDelaySamples, combDelaySamples);
+		const JitterMetrics feedbackMetrics = makeJitterMetrics (safeCombDelay, amt, sr, 2);
 		float feedbackSlow = 0.0f;
 		float feedbackFast = 0.0f;
-		advanceChaosEngine (jitterFeedbackPrev_, jitterFeedbackCurr_, jitterFeedbackNext_,
-		                    jitterFeedbackPhase_, jitterFeedbackDriftPhase_, jitterFeedbackDriftFreqHz_,
-		                    feedbackSlow, jitterFeedbackRng_, slowPeriod * 1.23f, amt, sr);
-		advanceChaosEngine (jitterFeedbackFastPrev_, jitterFeedbackFastCurr_, jitterFeedbackFastNext_,
-		                    jitterFeedbackFastPhase_, jitterFeedbackFastDriftPhase_, jitterFeedbackFastDriftFreqHz_,
-		                    feedbackFast, jitterFeedbackFastRng_, fastPeriod * 0.83f, amt, sr);
-		jitterFeedbackOut_ = juce::jlimit (-1.0f, 1.0f, feedbackSlow * 0.72f + feedbackFast * fastMix * 0.70f);
+		advanceChaosEngine (jitterFeedbackMod_.slowPrev, jitterFeedbackMod_.slowCurr, jitterFeedbackMod_.slowNext,
+		                    jitterFeedbackMod_.slowPhase, jitterFeedbackMod_.slowDriftPhase,
+		                    jitterFeedbackMod_.slowDriftFreqHz, feedbackSlow, jitterFeedbackMod_.slowRng,
+		                    sr / juce::jmax (kJitterMinEngineRateHz,
+		                                     feedbackMetrics.driftRateHz * kJitterFeedbackSlowRateScale),
+		                    feedbackMetrics.amountMapped, sr);
+		advanceChaosEngine (jitterFeedbackMod_.fastPrev, jitterFeedbackMod_.fastCurr, jitterFeedbackMod_.fastNext,
+		                    jitterFeedbackMod_.fastPhase, jitterFeedbackMod_.fastDriftPhase,
+		                    jitterFeedbackMod_.fastDriftFreqHz, feedbackFast, jitterFeedbackMod_.fastRng,
+		                    sr / juce::jmax (kJitterMinEngineRateHz,
+		                                     feedbackMetrics.flutterRateHz * kJitterFeedbackFastRateScale),
+		                    feedbackMetrics.amountMapped, sr);
+		jitterFeedbackOut_ = juce::jlimit (-kJitterFeedbackOutputLimit, kJitterFeedbackOutputLimit,
+			feedbackSlow * kJitterFeedbackSlowWeight
+			+ feedbackFast * (kJitterFeedbackFastWeightBase
+			                  + feedbackMetrics.shortness * kJitterFeedbackFastShortnessWeight));
+		jitterFeedbackDepth_ = feedbackMetrics.feedbackDepth * kJitterFeedbackDepthScale;
 
-		float combSlow = 0.0f;
-		float combFast = 0.0f;
-		advanceChaosEngine (jitterCombPrev_, jitterCombCurr_, jitterCombNext_,
-		                    jitterCombPhase_, jitterCombDriftPhase_, jitterCombDriftFreqHz_,
-		                    combSlow, jitterCombRng_, slowPeriod * 1.47f, amt, sr);
-		advanceChaosEngine (jitterCombFastPrev_, jitterCombFastCurr_, jitterCombFastNext_,
-		                    jitterCombFastPhase_, jitterCombFastDriftPhase_, jitterCombFastDriftFreqHz_,
-		                    combFast, jitterCombFastRng_, fastPeriod * 0.61f, amt, sr);
-		jitterCombOut_ = juce::jlimit (-1.0f, 1.0f, combSlow * 0.80f + combFast * fastMix * 0.45f);
+		const JitterMetrics combMetrics = makeJitterMetrics (safeCombDelay, amt, sr, 3);
+		jitterCombOut_ = advanceJitterModulator (jitterCombMod_, combMetrics, sr, 3);
+		jitterCombDepthOct_ = combMetrics.delayDepthOct;
 	}
 
 	inline float getJitterFreqMultiplier (int channel) const noexcept
@@ -738,9 +958,7 @@ private:
 			return 1.0f;
 
 		const int lane = juce::jlimit (0, 1, channel);
-		const float high = smoothStep01 ((amt - 0.72f) / 0.28f);
-		const float depthOct = (0.004f + 0.026f * amt) * amt * (1.0f + high * 0.25f);
-		return std::exp2 (jitterFreqOut_[lane] * depthOct);
+		return std::exp2 (-jitterFreqOut_[lane] * jitterFreqDepthOct_[lane]);
 	}
 
 	inline float getJitterSyncPhaseOffset (int channel) const noexcept
@@ -750,9 +968,7 @@ private:
 			return 0.0f;
 
 		const int lane = juce::jlimit (0, 1, channel);
-		const float high = smoothStep01 ((amt - 0.72f) / 0.28f);
-		const float depthCycles = (0.00015f + 0.00125f * amt) * amt * (1.0f + high * 0.55f);
-		return jitterFreqOut_[lane] * depthCycles;
+		return jitterFreqOut_[lane] * jitterSyncPhaseDepth_[lane];
 	}
 
 	inline float applyJitterToFeedbackMagnitude (float feedbackMagnitude) const noexcept
@@ -761,8 +977,8 @@ private:
 		if (! jitterActive_ || amt <= 0.000001f || feedbackMagnitude <= 0.0f)
 			return feedbackMagnitude;
 
-		const float depth = (0.012f + 0.045f * amt) * amt;
-		return juce::jlimit (0.0f, 0.99f, feedbackMagnitude * (1.0f + jitterFeedbackOut_ * depth));
+		return juce::jlimit (0.0f, 0.99f,
+			feedbackMagnitude * (1.0f + jitterFeedbackOut_ * jitterFeedbackDepth_));
 	}
 
 	inline float applyJitterToCombTarget (float combSamples) const noexcept
@@ -771,9 +987,8 @@ private:
 		if (! jitterActive_ || amt <= 0.000001f || combSamples <= 1.0f)
 			return combSamples;
 
-		const float high = smoothStep01 ((amt - 0.75f) / 0.25f);
-		const float depth = (0.0025f + 0.010f * amt) * amt * (1.0f + high * 0.25f);
-		return juce::jlimit (1.0f, (float) kFbkDelayMaxSamples, combSamples * (1.0f + jitterCombOut_ * depth));
+		return juce::jlimit (1.0f, (float) kFbkDelayMaxSamples,
+			combSamples * std::exp2 (jitterCombOut_ * jitterCombDepthOct_));
 	}
 
 	inline void advanceChaosD() noexcept

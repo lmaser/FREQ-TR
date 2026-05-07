@@ -19,6 +19,7 @@ public:
 	static constexpr const char* kParamJitter    = "jitter";
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
+	static constexpr const char* kParamWindow    = "window";
 	static constexpr const char* kParamStyle     = "style";
 	static constexpr const char* kParamHarm      = "harm";
 	static constexpr const char* kParamPolarity  = "polarity";
@@ -101,12 +102,35 @@ public:
 	static constexpr float kJitterDefault = 0.0f;
 
 	static constexpr float kCombMin     = 5.0f;
-	static constexpr float kCombMax     = 750.0f;
+	static constexpr float kCombMax     = 5000.0f;
 	static constexpr float kCombDefault = 5.0f;
 
-	static constexpr int kHilbertOrder = 512;          // Power-of-two circular buffer size.
-	static constexpr int kHilbertFirLength = 511;      // Odd FIR length for true antisymmetry.
-	static constexpr int kHilbertDelay = kHilbertFirLength / 2;
+	static constexpr int kHilbertWindowMin = 128;
+	static constexpr int kHilbertWindowMax = 2048;
+	static constexpr int kHilbertWindowDefault = 2048;
+	static constexpr int kNumHilbertWindows = 5;
+	static constexpr int kHilbertWindows[kNumHilbertWindows] = { 128, 256, 512, 1024, 2048 };
+	static constexpr int kHilbertMaxOrder = kHilbertWindowMax;
+	static constexpr int kHilbertMaxFirLength = kHilbertMaxOrder - 1;
+	static constexpr int kHilbertMaxDelay = kHilbertMaxFirLength / 2;
+
+	static int getCanonicalHilbertWindow (int windowValue) noexcept
+	{
+		if (windowValue <= 192)  return 128;
+		if (windowValue <= 384)  return 256;
+		if (windowValue <= 768)  return 512;
+		if (windowValue <= 1536) return 1024;
+		return 2048;
+	}
+
+	static int getHilbertWindowLane (int windowValue) noexcept
+	{
+		const int canonical = getCanonicalHilbertWindow (windowValue);
+		for (int i = 0; i < kNumHilbertWindows; ++i)
+			if (kHilbertWindows[i] == canonical)
+				return i;
+		return kNumHilbertWindows - 1;
+	}
 
 	static constexpr float kEngineMin     = 0.0f;
 	static constexpr float kEngineMax     = 1.0f;
@@ -278,9 +302,15 @@ private:
 	std::vector<float> cleanDelayBufL, cleanDelayBufR; // feedback-free delay for dry ref
 	int hilbertPos = 0;                                // write position in circular buffers
 
-	// Folded Hilbert taps: exploit antisymmetry + zero-skip (511 -> ~127 MACs)
+	// Folded Hilbert taps: exploit antisymmetry + zero-skip.
 	struct HilbertTap { int offset; float coeff; };
-	std::vector<HilbertTap> hilbertFoldedTaps;
+	std::array<std::vector<HilbertTap>, kNumHilbertWindows> hilbertFoldedTapsByWindow_;
+	int activeHilbertWindow_ = kHilbertWindowDefault;
+	int targetHilbertWindow_ = kHilbertWindowDefault;
+	int previousHilbertWindow_ = kHilbertWindowDefault;
+	int hilbertWindowCrossfadeRemaining_ = 0;
+	int hilbertWindowCrossfadeTotal_ = 0;
+	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
 
 	// ── Harmonics normalization / weighting ──
 	static constexpr int kMaxHarmonics = 24;
@@ -340,7 +370,7 @@ private:
 	float feedbackLastR = 0.0f;
 
 	// ── Feedback delay line (Comb-controlled resonant frequency) ──
-	static constexpr int kFbkDelayMaxSamples = 8192;
+	static constexpr int kFbkDelayMaxSamples = 65536;
 	float fbkDelayBufL[kFbkDelayMaxSamples] = {};
 	float fbkDelayBufR[kFbkDelayMaxSamples] = {};
 	int   fbkDelayWritePos = 0;
@@ -398,6 +428,7 @@ private:
 	std::atomic<float>* jitterParam   = nullptr;
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
+	std::atomic<float>* windowParam  = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
 	std::atomic<float>* harmParam    = nullptr;
 	std::atomic<float>* polarityParam = nullptr;

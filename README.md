@@ -39,6 +39,7 @@ The value column reflects the current context:
 - `COMB`: hertz
 - `JITTER`: percent
 - `ENGINE`: percent blend
+- `WIN`: Hilbert window size for the frequency-shift path
 - `STYLE`: MONO / STEREO / WIDE / DUAL
 - `HARM`: percent harmonic density
 - `POLARITY`: -1 to +1
@@ -100,7 +101,7 @@ The feedback path includes:
 - feedback low-pass conditioning
 - safety limiting
 
-### COMB (5-750 Hz)
+### COMB (5-5000 Hz)
 
 Resonant frequency of the feedback delay line. Higher values shorten the feedback delay and raise the comb resonance.
 
@@ -119,6 +120,12 @@ Blend between AM, ring modulation, and frequency shift:
 - 0% = AM
 - 50% = RM
 - 100% = FREQ SHIFT
+
+### WIN (128 / 256 / 512 / 1024 / 2048)
+
+Selects the FIR Hilbert window used by the frequency-shift side of the engine. It is exposed only for the `RM -> FREQ SHIFT` region because AM and RM do not need Hilbert sideband separation.
+
+The plugin reports and aligns to the maximum Hilbert delay internally, so changing `WIN` does not change the effective host latency. Window changes crossfade between the old and new Hilbert paths to avoid discontinuities.
 
 ### STYLE
 
@@ -164,7 +171,7 @@ Velocity also affects glide speed:
 
 ### ALIGN
 
-Delays the dry reference to match the Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
+Delays the dry reference to match the maximum Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
 
 ### PDC
 
@@ -243,8 +250,8 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 
 ### DSP Architecture
 
-- Hilbert transform: 511-tap odd-length FIR with Blackman windowing
-- Real path: matched delay for correct single-sideband reconstruction
+- Hilbert transform: selectable 127 / 255 / 511 / 1023 / 2047-tap odd-length FIR with Blackman windowing
+- Real path: matched to the maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
 - Harmonic cap: 24 partials max, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
@@ -284,6 +291,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added CHAOS F / CHAOS D
 - Added JITTER for deterministic internal movement of frequency, comb, and feedback
 - Added AM -> RM -> FREQ SHIFT engine mapping
+- Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

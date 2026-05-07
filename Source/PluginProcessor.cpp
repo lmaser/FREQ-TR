@@ -163,6 +163,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	jitterParam   = apvts.getRawParameterValue (kParamJitter);
 	combParam     = apvts.getRawParameterValue (kParamComb);
 	engineParam  = apvts.getRawParameterValue (kParamEngine);
+	windowParam  = apvts.getRawParameterValue (kParamWindow);
 	styleParam   = apvts.getRawParameterValue (kParamStyle);
 	harmParam    = apvts.getRawParameterValue (kParamHarm);
 	polarityParam = apvts.getRawParameterValue (kParamPolarity);
@@ -355,32 +356,42 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	juce::ignoreUnused (samplesPerBlock);
 	currentSampleRate = sampleRate;
 
-	// ── Design Hilbert FIR and build folded taps ──
+	// ── Design Hilbert FIRs and build folded taps ──
 	{
-		std::vector<float> coeffs ((size_t) kHilbertFirLength, 0.0f);
-		designHilbertFIR (coeffs.data(), kHilbertFirLength);
-
-		const int half = kHilbertFirLength / 2;
-		hilbertFoldedTaps.clear();
-
-		// Exploit antisymmetry: h[k] = -h[N-1-k] for nonzero taps.
-		// Pair taps (k, N-1-k) into a single multiply: h[k] * (x[n-k] - x[n-(N-1-k)])
-		// Only odd-distance taps are nonzero, and we only need k < half.
-		for (int k = 0; k < half; ++k)
+		for (int lane = 0; lane < kNumHilbertWindows; ++lane)
 		{
-			if (std::abs (coeffs[(size_t) k]) < 1e-12f)
-				continue;
-			hilbertFoldedTaps.push_back ({ k, coeffs[(size_t) k] });
+			const int firLength = kHilbertWindows[lane] - 1;
+			std::vector<float> coeffs ((size_t) firLength, 0.0f);
+			designHilbertFIR (coeffs.data(), firLength);
+
+			const int half = firLength / 2;
+			auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
+			taps.clear();
+
+			// Exploit antisymmetry: h[k] = -h[N-1-k] for nonzero taps.
+			for (int k = 0; k < half; ++k)
+			{
+				if (std::abs (coeffs[(size_t) k]) < 1e-12f)
+					continue;
+				taps.push_back ({ k, coeffs[(size_t) k] });
+			}
 		}
 	}
 
 	// Circular buffers for FIR convolution
-	hilbertBufL.assign ((size_t) kHilbertOrder, 0.0f);
-	hilbertBufR.assign ((size_t) kHilbertOrder, 0.0f);
-	cleanDelayBufL.assign ((size_t) kHilbertOrder, 0.0f);
-	cleanDelayBufR.assign ((size_t) kHilbertOrder, 0.0f);
+	hilbertBufL.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	hilbertBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	cleanDelayBufL.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	cleanDelayBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 
 	hilbertPos = 0;
+	activeHilbertWindow_ = getCanonicalHilbertWindow (
+		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault)));
+	targetHilbertWindow_ = activeHilbertWindow_;
+	previousHilbertWindow_ = activeHilbertWindow_;
+	hilbertWindowCrossfadeRemaining_ = 0;
+	hilbertWindowCrossfadeTotal_ = 0;
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
 	smoothedFreq = 0.0f;
@@ -406,7 +417,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	fbkDelayWritePos = 0;
 	{
 		const float initCombHz = juce::jlimit (kCombMin, kCombMax, loadAtomicOrDefault (combParam, kCombDefault));
-		smoothedComb_ = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) initCombHz) - kHilbertDelay);
+		smoothedComb_ = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) initCombHz));
 	}
 
 	// DC blocker coefficient: R = e^(-2π * fHP / fs)
@@ -431,7 +442,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 	// Report latency if PDC enabled
 	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
-	setLatencySamples (pdcEnabled ? kHilbertDelay : 0);
+	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
 
 	// Reset wet filter state
 	wetFilterState_[0].reset();
@@ -595,7 +606,8 @@ void FREQTRAudioProcessor::releaseResources()
 {
 	hilbertBufL.clear();
 	hilbertBufR.clear();
-	hilbertFoldedTaps.clear();
+	for (auto& taps : hilbertFoldedTapsByWindow_)
+		taps.clear();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -698,7 +710,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	for (int i = numChannels; i < buffer.getNumChannels(); ++i)
 		buffer.clear (i, 0, numSamples);
 
-	if (currentSampleRate <= 0.0 || hilbertFoldedTaps.empty())
+	if (currentSampleRate <= 0.0
+		|| hilbertFoldedTapsByWindow_[0].empty()
+		|| hilbertFoldedTapsByWindow_[1].empty()
+		|| hilbertFoldedTapsByWindow_[2].empty()
+		|| hilbertFoldedTapsByWindow_[3].empty()
+		|| hilbertFoldedTapsByWindow_[4].empty())
 		return;
 
 	// ── Read parameters ──
@@ -708,8 +725,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
 	const float combHz = juce::jlimit (kCombMin, kCombMax,
 		loadAtomicOrDefault (combParam, kCombDefault));
-	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz) - kHilbertDelay);
+	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz));
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
+	const int targetHilbertWindow = getCanonicalHilbertWindow (
+		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault)));
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float harm   = loadAtomicOrDefault (harmParam, kHarmDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
@@ -752,7 +771,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
 
-	setLatencySamples (pdcEnabled ? kHilbertDelay : 0);
+	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
+
+	if (targetHilbertWindow != targetHilbertWindow_)
+	{
+		previousHilbertWindow_ = activeHilbertWindow_;
+		targetHilbertWindow_ = targetHilbertWindow;
+		hilbertWindowCrossfadeTotal_ = juce::jmax (1, (int) std::round (currentSampleRate * 0.030));
+		hilbertWindowCrossfadeRemaining_ = hilbertWindowCrossfadeTotal_;
+	}
 
 	useSyncRetrigPhase = false; // reset per block; set true if SYNC+RETRIG+PPQ
 
@@ -845,9 +872,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	feedbackSmoothed.setTargetValue (targetFeedback);
 
-	const int order = kHilbertOrder;
-	const int firLength = kHilbertFirLength;
-	const int half  = kHilbertDelay;
+	const int order = kHilbertMaxOrder;
+	const int orderMask = kHilbertMaxOrder - 1;
 	const float invSr = 1.0f / (float) currentSampleRate;
 
 	float* writeL = (numChannels > 0) ? buffer.getWritePointer (0) : nullptr;
@@ -1134,23 +1160,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
 		hilbertBufR[(size_t) hilbertPos] = fbInR;
 
-		// ── Hilbert FIR convolution (90° path) — folded antisymmetric taps ──
-		float hilbL = 0.0f, hilbR = 0.0f;
-		for (const auto& tap : hilbertFoldedTaps)
-		{
-			const int i1 = (hilbertPos - tap.offset + order) & (order - 1);
-			const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & (order - 1);
-			const float diffL = hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2];
-			const float diffR = hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2];
-			hilbL += tap.coeff * diffL;
-			hilbR += tap.coeff * diffR;
-		}
-
-		// ── Real path: delayed input (matches Hilbert group delay) ──
-		const int delayIdx = (hilbertPos - half + order) & (order - 1);
-		const float realL = hilbertBufL[(size_t) delayIdx];
-		const float realR = hilbertBufR[(size_t) delayIdx];
-
 		// Harmonic density and quadrature oscillator pair
 		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqL);
 		const float harmonicCountR = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqR);
@@ -1167,55 +1176,138 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// ── Engine blend: AM (0) -> RM (0.5) -> Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
-		float wetL, wetR;
 
-		if (std::abs (jitteredFreqL) < 0.001f)
+		struct WetPair { float l = 0.0f, r = 0.0f; };
+
+		auto makeWindowWet = [&] (int window) -> WetPair
 		{
-			wetL = realL;
-			wetR = useStereoInput ? realR : realL;
-		}
-		else
-		{
-			// AM uses a unipolar carrier; RM keeps the bipolar multiplication.
-			const auto amEnvelope = [] (float carrier) noexcept
+			const int lane = getHilbertWindowLane (window);
+			const int firLength = window - 1;
+			const int half = firLength / 2;
+			const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
+
+			float hilbL = 0.0f, hilbR = 0.0f;
+			for (const auto& tap : taps)
 			{
-				return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, carrier);
-			};
+				const int i1 = (hilbertPos - tap.offset + order) & orderMask;
+				const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & orderMask;
+				const float diffL = hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2];
+				const float diffR = hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2];
+				hilbL += tap.coeff * diffL;
+				hilbR += tap.coeff * diffR;
+			}
 
-			const float carrierL = oscWave;
-			const float carrierR = useStereoInput
-				? (style == 2 ? -oscWave
-				  : (style == 3 ? oscWaveR
-				                : oscWave))
-				: carrierL;
+			const int delayIdx = (hilbertPos - half + order) & orderMask;
+			const float realL = hilbertBufL[(size_t) delayIdx];
+			const float realR = hilbertBufR[(size_t) delayIdx];
 
-			const float amL = realL * amEnvelope (carrierL);
-			const float amR = useStereoInput ? (realR * amEnvelope (carrierR)) : amL;
-			const float rmL = realL * carrierL;
-			const float rmR = useStereoInput ? (realR * carrierR) : rmL;
-
-			// Freq Shift: Re[ analytic × e^(j2πft) ] = real·cos − hilbert·sin
-			const float fsL = realL * oscWaveCos - hilbL * oscWave;
-			const float fsR = useStereoInput
-				? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)
-				  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)
-				                : (realR * oscWaveCos - hilbR * oscWave)))
-				: fsL;
-
-			const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);
-			if (enginePos < 0.5f)
+			float coreL, coreR;
+			if (std::abs (jitteredFreqL) < 0.001f)
 			{
-				const float t = enginePos * 2.0f;
-				wetL = amL + t * (rmL - amL);
-				wetR = amR + t * (rmR - amR);
+				coreL = realL;
+				coreR = useStereoInput ? realR : realL;
 			}
 			else
 			{
-				const float t = (enginePos - 0.5f) * 2.0f;
-				wetL = rmL + t * (fsL - rmL);
-				wetR = rmR + t * (fsR - rmR);
+				const auto amEnvelope = [] (float carrier) noexcept
+				{
+					return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, carrier);
+				};
+
+				const float carrierL = oscWave;
+				const float carrierR = useStereoInput
+					? (style == 2 ? -oscWave
+					  : (style == 3 ? oscWaveR
+					                : oscWave))
+					: carrierL;
+
+				const float amL = realL * amEnvelope (carrierL);
+				const float amR = useStereoInput ? (realR * amEnvelope (carrierR)) : amL;
+				const float rmL = realL * carrierL;
+				const float rmR = useStereoInput ? (realR * carrierR) : rmL;
+
+				const float fsL = realL * oscWaveCos - hilbL * oscWave;
+				const float fsR = useStereoInput
+					? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)
+					  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)
+					                : (realR * oscWaveCos - hilbR * oscWave)))
+					: fsL;
+
+				const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);
+				if (enginePos < 0.5f)
+				{
+					const float t = enginePos * 2.0f;
+					coreL = amL + t * (rmL - amL);
+					coreR = amR + t * (rmR - amR);
+				}
+				else
+				{
+					const float t = (enginePos - 0.5f) * 2.0f;
+					coreL = rmL + t * (fsL - rmL);
+					coreR = rmR + t * (fsR - rmR);
+				}
+			}
+
+			const int pad = kHilbertMaxDelay - half;
+			hilbertWetCompBuf_[lane][0][hilbertPos] = coreL;
+			hilbertWetCompBuf_[lane][1][hilbertPos] = coreR;
+			const int compIdx = (hilbertPos - pad + order) & orderMask;
+			return { hilbertWetCompBuf_[lane][0][compIdx],
+			         hilbertWetCompBuf_[lane][1][compIdx] };
+		};
+
+		WetPair wetPair;
+		const bool needsDualWindowRender = smoothedEngine > 0.5f
+			|| engine > 0.5f
+			|| (hilbertWindowCrossfadeRemaining_ > 0 && hilbertWindowCrossfadeTotal_ > 0);
+
+		if (needsDualWindowRender)
+		{
+			std::array<WetPair, kNumHilbertWindows> wetByWindow {};
+			for (int lane = 0; lane < kNumHilbertWindows; ++lane)
+				wetByWindow[(size_t) lane] = makeWindowWet (kHilbertWindows[lane]);
+
+			auto selectWet = [&] (int window) noexcept -> WetPair
+			{
+				return wetByWindow[(size_t) getHilbertWindowLane (window)];
+			};
+
+			if (hilbertWindowCrossfadeRemaining_ > 0 && hilbertWindowCrossfadeTotal_ > 0)
+			{
+				const WetPair oldWet = selectWet (previousHilbertWindow_);
+				const WetPair newWet = selectWet (targetHilbertWindow_);
+				const float progress = 1.0f - ((float) hilbertWindowCrossfadeRemaining_
+				                               / (float) hilbertWindowCrossfadeTotal_);
+				const float oldMix = std::cos (progress * juce::MathConstants<float>::halfPi);
+				const float newMix = std::sin (progress * juce::MathConstants<float>::halfPi);
+				wetPair.l = oldWet.l * oldMix + newWet.l * newMix;
+				wetPair.r = oldWet.r * oldMix + newWet.r * newMix;
+
+				--hilbertWindowCrossfadeRemaining_;
+				if (hilbertWindowCrossfadeRemaining_ <= 0)
+				{
+					hilbertWindowCrossfadeRemaining_ = 0;
+					hilbertWindowCrossfadeTotal_ = 0;
+					activeHilbertWindow_ = targetHilbertWindow_;
+					previousHilbertWindow_ = activeHilbertWindow_;
+				}
+			}
+			else
+			{
+				if (activeHilbertWindow_ != targetHilbertWindow_)
+					activeHilbertWindow_ = targetHilbertWindow_;
+				wetPair = selectWet (activeHilbertWindow_);
 			}
 		}
+		else
+		{
+			if (activeHilbertWindow_ != targetHilbertWindow_)
+				activeHilbertWindow_ = targetHilbertWindow_;
+			wetPair = makeWindowWet (activeHilbertWindow_);
+		}
+
+		float wetL = wetPair.l;
+		float wetR = wetPair.r;
 
 		// Write conditioned wet into feedback delay line
 		{
@@ -1361,8 +1453,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// ── Mix dry/wet with Sum Bus routing ──
 		// Use clean delay buffer for dry reference (feedback-free)
-		const float cleanDryL = cleanDelayBufL[(size_t) delayIdx];
-		const float cleanDryR = cleanDelayBufR[(size_t) delayIdx];
+		const int dryDelayIdx = (hilbertPos - kHilbertMaxDelay + order) & orderMask;
+		const float cleanDryL = cleanDelayBufL[(size_t) dryDelayIdx];
+		const float cleanDryR = cleanDelayBufR[(size_t) dryDelayIdx];
 		const float dryRefL = alignEnabled ? cleanDryL : inL;
 		const float dryRefR = alignEnabled ? cleanDryR : inR;
 		float wL = wetL * smoothedInputGain * smoothedOutputGain;
@@ -1450,7 +1543,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			oscPhaseR -= std::floor (oscPhaseR);
 		}
 
-		hilbertPos = (hilbertPos + 1) & (order - 1);
+		hilbertPos = (hilbertPos + 1) & orderMask;
 	}
 
 	// ── Invert Polarity / Stereo (GLOBAL mode: after Limiter GLOBAL, before safety clip) ──
@@ -1551,6 +1644,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",
 		juce::NormalisableRange<float> (kEngineMin, kEngineMax, 0.0f, 1.0f), kEngineDefault));
+
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamWindow, "Window",
+		juce::NormalisableRange<float> ((float) kHilbertWindowMin, (float) kHilbertWindowMax, 1.0f, 1.0f),
+		(float) kHilbertWindowDefault));
 
 	// Style: 0 = Mono, 1 = Stereo, 2 = Wide, 3 = Dual
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (

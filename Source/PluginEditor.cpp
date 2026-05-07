@@ -732,7 +732,7 @@ void FREQTRAudioProcessorEditor::DualMixBarComponent::mouseMove (const juce::Mou
 FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    const std::array<BarSlider*, 15> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
 
     useCustomPalette = audioProcessor.getUiUseCustomPalette();
     crtEnabled = audioProcessor.getUiCrtEnabled();
@@ -787,6 +787,10 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     jitterSlider.setNumDecimalPlacesToDisplay (1);
     combSlider.setNumDecimalPlacesToDisplay (2);
     engineSlider.setNumDecimalPlacesToDisplay (1);
+    windowSlider.setNumDecimalPlacesToDisplay (0);
+    windowSlider.setRange ((double) FREQTRAudioProcessor::kHilbertWindowMin,
+                           (double) FREQTRAudioProcessor::kHilbertWindowMax,
+                           1.0);
     styleSlider.setNumDecimalPlacesToDisplay (0);
     harmSlider.setNumDecimalPlacesToDisplay (1);
     polaritySlider.setNumDecimalPlacesToDisplay (2);
@@ -962,6 +966,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindSlider (jitterAttachment,  FREQTRAudioProcessor::kParamJitter,  jitterSlider,  (double) FREQTRAudioProcessor::kJitterDefault);
     bindSlider (combAttachment,    FREQTRAudioProcessor::kParamComb,    combSlider,    (double) FREQTRAudioProcessor::kCombDefault);
     bindSlider (engineAttachment,  FREQTRAudioProcessor::kParamEngine,  engineSlider,  (double) FREQTRAudioProcessor::kEngineDefault);
+    bindSlider (windowAttachment,  FREQTRAudioProcessor::kParamWindow,  windowSlider,  (double) FREQTRAudioProcessor::kHilbertWindowDefault);
     bindSlider (styleAttachment,   FREQTRAudioProcessor::kParamStyle,   styleSlider,   (double) FREQTRAudioProcessor::kStyleDefault);
     bindSlider (harmAttachment,    FREQTRAudioProcessor::kParamHarm,    harmSlider,    (double) FREQTRAudioProcessor::kHarmDefault);
     bindSlider (polarityAttachment, FREQTRAudioProcessor::kParamPolarity, polaritySlider, kDefaultPolarity);
@@ -978,6 +983,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 
     // Dim Comb slider when Feedback is zero
     updateCombEnabled();
+    updateWindowEnabled();
 
     auto bindButton = [&] (std::unique_ptr<ButtonAttachment>& attachment,
                            const char* paramId,
@@ -1051,7 +1057,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     dismissEditorOwnedModalPrompts (lnf);
     setPromptOverlayActive (false);
 
-    const std::array<BarSlider*, 15> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
     for (auto* slider : barSliders)
         slider->removeListener (this);
 
@@ -1114,13 +1120,22 @@ void FREQTRAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
     auto isBarSlider = [&] (const juce::Slider* s)
     {
         return s == &freqSlider || s == &modSlider || s == &feedbackSlider || s == &jitterSlider || s == &combSlider
-            || s == &engineSlider
+            || s == &engineSlider || s == &windowSlider
         || s == &styleSlider || s == &harmSlider || s == &polaritySlider || s == &mixSlider
             || s == &inputSlider || s == &outputSlider;
     };
 
     if (slider == &feedbackSlider)
         updateCombEnabled();
+    if (slider == &engineSlider)
+        updateWindowEnabled();
+    if (slider == &windowSlider)
+    {
+        const double snapped = (double) FREQTRAudioProcessor::getCanonicalHilbertWindow (
+            (int) std::lround (windowSlider.getValue()));
+        if (std::abs (windowSlider.getValue() - snapped) > 0.5)
+            windowSlider.setValue (snapped, juce::sendNotificationSync);
+    }
 
     refreshLegendTextCache();
 
@@ -1152,14 +1167,20 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
         promptOverlay.toFront (false);
 
     const bool enableControls = ! shouldBeActive;
-    const std::array<juce::Component*, 16> interactiveControls {
+    const std::array<juce::Component*, 17> interactiveControls {
         &inputSlider, &outputSlider, &mixSlider,
-        &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &harmSlider,
+        &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider,
         &polaritySlider, &styleSlider,
         &syncButton, &midiButton, &alignButton, &pdcButton
     };
     for (auto* control : interactiveControls)
         control->setEnabled (enableControls);
+
+    if (! shouldBeActive)
+    {
+        updateCombEnabled();
+        updateWindowEnabled();
+    }
 
     if (resizerCorner != nullptr)
         resizerCorner->setEnabled (enableControls);
@@ -1493,6 +1514,14 @@ void FREQTRAudioProcessorEditor::updateCombEnabled()
     repaint();
 }
 
+void FREQTRAudioProcessorEditor::updateWindowEnabled()
+{
+    const bool active = (engineSlider.getValue() > 0.5);
+    windowSlider.setAlpha (active ? 1.0f : 0.35f);
+    windowSlider.setEnabled (active);
+    repaint();
+}
+
 juce::String FREQTRAudioProcessorEditor::getEngineText() const
 {
     const float val = (float) engineSlider.getValue();
@@ -1529,6 +1558,18 @@ juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
 
     const int pct = (int) std::lround ((val - 0.5f) * 200.0f);
     return "RM|FS " + juce::String (pct) + "%";
+}
+
+juce::String FREQTRAudioProcessorEditor::getWindowText() const
+{
+    const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue()));
+    return juce::String (window) + " WINDOW";
+}
+
+juce::String FREQTRAudioProcessorEditor::getWindowTextShort() const
+{
+    const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue()));
+    return juce::String (window) + " WIN";
 }
 
 juce::String FREQTRAudioProcessorEditor::getStyleText() const
@@ -1689,6 +1730,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     const auto oldCombShort    = cachedCombTextShort;
     const auto oldEngineFull   = cachedEngineTextFull;
     const auto oldEngineShort  = cachedEngineTextShort;
+    const auto oldWindowFull   = cachedWindowTextFull;
+    const auto oldWindowShort  = cachedWindowTextShort;
     const auto oldStyleFull    = cachedStyleTextFull;
     const auto oldStyleShort   = cachedStyleTextShort;
     const auto oldHarmFull     = cachedHarmTextFull;
@@ -1720,6 +1763,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     cachedCombTextShort     = getCombTextShort();
     cachedEngineTextFull    = getEngineText();
     cachedEngineTextShort   = getEngineTextShort();
+    cachedWindowTextFull    = getWindowText();
+    cachedWindowTextShort   = getWindowTextShort();
     cachedStyleTextFull     = getStyleText();
     cachedStyleTextShort    = getStyleTextShort();
     cachedHarmTextFull      = getHarmText();
@@ -1790,6 +1835,7 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
             cachedCombIntOnly = juce::String (chz, 1) + "Hz";
     }
     cachedEngineIntOnly   = juce::String ((int) std::lround (engineSlider.getValue() * 100.0)) + "%";
+    cachedWindowIntOnly   = juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue())));
     cachedHarmIntOnly     = getHarmTextShort();
     cachedPolarityIntOnly = juce::String (polaritySlider.getValue(), 1);
     cachedStyleIntOnly    = juce::String ((int) styleSlider.getValue());
@@ -1828,6 +1874,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         || oldCombShort     != cachedCombTextShort
         || oldEngineFull    != cachedEngineTextFull
         || oldEngineShort   != cachedEngineTextShort
+        || oldWindowFull    != cachedWindowTextFull
+        || oldWindowShort   != cachedWindowTextShort
         || oldStyleFull     != cachedStyleTextFull
         || oldStyleShort    != cachedStyleTextShort
         || oldHarmFull      != cachedHarmTextFull
@@ -2282,6 +2330,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &jitterSlider)    { suffix = " % JITTER";   suffixShort = " % JIT"; }
     else if (&s == &combSlider)      { suffix = " HZ";         suffixShort = " HZ"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " %"; }
+    else if (&s == &windowSlider)    { suffix = " WIN";        suffixShort = " WIN"; }
     else if (&s == &styleSlider)     { suffix = " STYLE";      suffixShort = " STYLE"; }
     else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " %"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
@@ -2301,6 +2350,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         currentDisplay = juce::String (modSliderToMultiplier (s.getValue()), 2);
     else if (&s == &engineSlider)
         currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
+    else if (&s == &windowSlider)
+        currentDisplay = juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (s.getValue())));
     else if (&s == &feedbackSlider)
         currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
     else if (&s == &jitterSlider)
@@ -2370,6 +2421,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             worstCaseText = "100.0";
         else if (&s == &engineSlider)
             worstCaseText = "100";
+        else if (&s == &windowSlider)
+            worstCaseText = "2048";
         else if (&s == &styleSlider)
             worstCaseText = "1";
         else if (&s == &harmSlider)
@@ -2503,6 +2556,13 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             maxVal = 100.0;
             maxDecs = 1;
             maxLen = 5;
+        }
+        else if (&s == &windowSlider)
+        {
+            minVal = FREQTRAudioProcessor::kHilbertWindowMin;
+            maxVal = FREQTRAudioProcessor::kHilbertWindowMax;
+            maxDecs = 0;
+            maxLen = 4;
         }
         else if (&s == &styleSlider)
         {
@@ -2715,6 +2775,10 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                 && ! safeThis->syncButton.getToggleState())
             {
                 clamped = roundToDecimals (clamped, 1);
+            }
+            else if (safeThis != nullptr && sliderPtr == &safeThis->windowSlider)
+            {
+                clamped = (double) FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (clamped));
             }
 
             sliderPtr->setValue (clamped, juce::sendNotificationSync);
@@ -4756,7 +4820,7 @@ namespace
     constexpr int kTitleRightGapToInfoPx = 8;
     constexpr int kVersionGapPx = 8;
     constexpr int kToggleLegendCollisionPadPx = 6;
-    constexpr int kNumBars = 13;
+    constexpr int kNumBars = 14;
 
     int getToggleVisualBoxSidePx (const juce::Component& button)
     {
@@ -4842,10 +4906,10 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
     const int sliderBottomRef = ioExpanded ? m.chaosRowY : m.btnRow1Y;
     m.availableForSliders = juce::jmax (40, sliderBottomRef - m.betweenSlidersAndButtons - m.topMargin);
 
-    // Bars below toggle: 8 IO rows when expanded (IN, OUT, TILT, FILTER, PAN, MIX, LIM + MODE_ROW), 9 main bars when collapsed.
+    // Bars below toggle: 8 IO rows when expanded (IN, OUT, TILT, FILTER, PAN, MIX, LIM + MODE_ROW), 10 main bars when collapsed.
     // Toggle bar stays fixed — only bar/gap sizing adapts to the visible count.
-    const int numSliders = 9;
-    const int numGaps    = 9;  // (N-1) inter-slider + 1 toggle-to-first
+    const int numSliders = 10;
+    const int numGaps    = 10;  // (N-1) inter-slider + 1 toggle-to-first
 
     m.toggleBarH = 20;  // fixed visual height for click area
     const int spaceForScale = juce::jmax (40, m.availableForSliders - m.toggleBarH);
@@ -4879,7 +4943,7 @@ void FREQTRAudioProcessorEditor::updateCachedLayout()
 
     const juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                                &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider,
-        &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
+        &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
     {
@@ -4983,10 +5047,11 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "X4.00 MOD",
         "100% FEEDBACK",
         "100% JITTER",
-        "750.00 Hz COMB",
+        "5.00 kHz COMB",
         "FREQ SHIFT ENGINE",
         "100% AM|RM ENGINE",
         "100% RM|FS ENGINE",
+        "2048 WINDOW",
         "STEREO STYLE", "DUAL STYLE",
         "100% HARM",
         "-1.00 POLARITY",
@@ -5018,7 +5083,7 @@ juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Poin
 {
     juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                          &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider,
-        &engineSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
+        &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
@@ -5235,10 +5300,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
     {
         const juce::String* fullTexts[kNumBars]  = { &cachedInputTextFull, &cachedOutputTextFull, &cachedMixTextFull,
                                                       &cachedFreqTextFull, &cachedModTextFull, &cachedFeedbackTextFull, &cachedJitterTextFull, &cachedCombTextFull,
-        &cachedEngineTextFull, &cachedHarmTextFull, &cachedPolarityTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
+        &cachedEngineTextFull, &cachedWindowTextFull, &cachedHarmTextFull, &cachedPolarityTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
         const juce::String* shortTexts[kNumBars] = { &cachedInputTextShort, &cachedOutputTextShort, &cachedMixTextShort,
                                                       &cachedFreqTextShort, &cachedModTextShort, &cachedFeedbackTextShort, &cachedJitterTextShort, &cachedCombTextShort,
-        &cachedEngineTextShort, &cachedHarmTextShort, &cachedPolarityTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
+        &cachedEngineTextShort, &cachedWindowTextShort, &cachedHarmTextShort, &cachedPolarityTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
         const juce::String* intTexts[kNumBars] = {
             &cachedInputIntOnly,
             &cachedOutputIntOnly,
@@ -5249,7 +5314,8 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             &cachedJitterIntOnly,
             &cachedCombIntOnly,
             &cachedEngineIntOnly,
-        &cachedHarmIntOnly,
+            &cachedWindowIntOnly,
+            &cachedHarmIntOnly,
             &cachedPolarityIntOnly,
             &cachedStyleIntOnly,
             &cachedTiltIntOnly
@@ -5517,7 +5583,8 @@ void FREQTRAudioProcessorEditor::resized()
         jitterSlider.setBounds (0, 0, 0, 0);
         combSlider.setBounds (0, 0, 0, 0);
         engineSlider.setBounds (0, 0, 0, 0);
-    harmSlider.setBounds (0, 0, 0, 0);
+        windowSlider.setBounds (0, 0, 0, 0);
+        harmSlider.setBounds (0, 0, 0, 0);
         polaritySlider.setBounds (0, 0, 0, 0);
         styleSlider.setBounds (0, 0, 0, 0);
 
@@ -5527,7 +5594,8 @@ void FREQTRAudioProcessorEditor::resized()
         jitterSlider.setVisible (false);
         combSlider.setVisible (false);
         engineSlider.setVisible (false);
-    harmSlider.setVisible (false);
+        windowSlider.setVisible (false);
+        harmSlider.setVisible (false);
         polaritySlider.setVisible (false);
         styleSlider.setVisible (false);
     }
@@ -5576,7 +5644,8 @@ void FREQTRAudioProcessorEditor::resized()
         jitterSlider.setVisible (true);
         combSlider.setVisible (true);
         engineSlider.setVisible (true);
-    harmSlider.setVisible (true);
+        windowSlider.setVisible (true);
+        harmSlider.setVisible (true);
         polaritySlider.setVisible (true);
         styleSlider.setVisible (true);
 
@@ -5586,9 +5655,10 @@ void FREQTRAudioProcessorEditor::resized()
         jitterSlider.setBounds   (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
         combSlider.setBounds     (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
         engineSlider.setBounds   (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
-    harmSlider.setBounds     (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
-        polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 7 * step, horizontalLayout.barW, verticalLayout.barH);
-        styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 8 * step, horizontalLayout.barW, verticalLayout.barH);
+        windowSlider.setBounds   (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
+        harmSlider.setBounds     (horizontalLayout.leftX, mainTop + 7 * step, horizontalLayout.barW, verticalLayout.barH);
+        polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 8 * step, horizontalLayout.barW, verticalLayout.barH);
+        styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 9 * step, horizontalLayout.barW, verticalLayout.barH);
     }
 
     // Button area: 2 rows — row1: ALIGN+PDC, row2: SYNC+MIDI

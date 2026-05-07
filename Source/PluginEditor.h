@@ -101,6 +101,9 @@ private:
                 return juce::String (percent, 1);
             }
 
+            if (owner != nullptr && this == &owner->windowSlider)
+                return juce::String ((int) FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (v)));
+
             // For polarity (-1 to 1)
             if (owner != nullptr && this == &owner->polaritySlider)
             {
@@ -120,7 +123,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 15 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, JIT, COMB, ENGINE, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
+    // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, JIT, COMB, ENGINE, WIN, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
@@ -130,6 +133,7 @@ private:
     BarSlider jitterSlider;
     BarSlider combSlider;
     BarSlider engineSlider;
+    BarSlider windowSlider;
     BarSlider harmSlider;
     BarSlider polaritySlider;
     BarSlider styleSlider;
@@ -270,6 +274,7 @@ private:
     std::unique_ptr<SliderAttachment> jitterAttachment;
     std::unique_ptr<SliderAttachment> combAttachment;
     std::unique_ptr<SliderAttachment> engineAttachment;
+    std::unique_ptr<SliderAttachment> windowAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
     std::unique_ptr<SliderAttachment> harmAttachment;
     std::unique_ptr<SliderAttachment> polarityAttachment;
@@ -439,9 +444,13 @@ private:
     juce::String getCombTextShort() const;
 
     void updateCombEnabled();
+    void updateWindowEnabled();
 
     juce::String getEngineText() const;
     juce::String getEngineTextShort() const;
+
+    juce::String getWindowText() const;
+    juce::String getWindowTextShort() const;
 
     juce::String getStyleText() const;
     juce::String getStyleTextShort() const;
@@ -507,6 +516,8 @@ private:
     juce::String cachedCombTextShort;
     juce::String cachedEngineTextFull;
     juce::String cachedEngineTextShort;
+    juce::String cachedWindowTextFull;
+    juce::String cachedWindowTextShort;
     juce::String cachedStyleTextFull;
     juce::String cachedStyleTextShort;
     juce::String cachedHarmTextFull;
@@ -538,6 +549,7 @@ private:
     juce::String cachedJitterIntOnly;
     juce::String cachedCombIntOnly;
     juce::String cachedEngineIntOnly;
+    juce::String cachedWindowIntOnly;
     juce::String cachedHarmIntOnly;
     juce::String cachedPolarityIntOnly;
     juce::String cachedStyleIntOnly;
@@ -555,7 +567,7 @@ private:
 
     HorizontalLayoutMetrics cachedHLayout_;
     VerticalLayoutMetrics cachedVLayout_;
-    std::array<juce::Rectangle<int>, 13> cachedValueAreas_;
+    std::array<juce::Rectangle<int>, 14> cachedValueAreas_;
     juce::Rectangle<int> cachedFilterValueArea_;
     juce::Rectangle<int> cachedPanValueArea_;
     juce::Rectangle<int> cachedLimThresholdValueArea_;
@@ -569,7 +581,7 @@ private:
     static constexpr double kDefaultPolarity = (double) FREQTRAudioProcessor::kPolarityDefault;
 
     static constexpr int kMinW = 360;
-    static constexpr int kMinH = 660;
+    static constexpr int kMinH = 700;
     static constexpr int kMaxW = 800;
     static constexpr int kMaxH = 760;
 

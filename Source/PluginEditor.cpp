@@ -89,7 +89,7 @@ static juce::String formatSidechainToneText (float hz)
 
 static juce::String formatSidechainTooltip (float time, float tone)
 {
-    return "SIDECHAIN: TIME x" + juce::String (juce::jlimit (0.0f, 1.0f, time), 2)
+    return "TIME x" + juce::String (juce::jlimit (0.0f, 1.0f, time), 2)
          + " / TONE " + formatSidechainToneText (tone);
 }
 
@@ -5372,11 +5372,10 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
     m.btnRow2Y = m.btnRow3Y - m.btnRowGap - m.box;
     m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
 
-    // When expanded, buttons are hidden — chaos sits at the very bottom row.
-    // When collapsed, buttons occupy btnRow1/btnRow2 and chaos is hidden.
-    m.chaosRowY = ioExpanded ? (editorH - m.bottomMargin - m.box) : 0;
+    // Expanded: chaos sits above SIDECHAIN. Collapsed: two utility rows sit at the bottom.
+    m.chaosRowY = ioExpanded ? m.btnRow2Y : 0;
 
-    const int sliderBottomRef = ioExpanded ? m.chaosRowY : m.btnRow1Y;
+    const int sliderBottomRef = ioExpanded ? m.chaosRowY : m.btnRow2Y;
     m.availableForSliders = juce::jmax (40, sliderBottomRef - m.betweenSlidersAndButtons - m.topMargin);
 
     // Bars below toggle: 8 IO rows when expanded (IN, OUT, TILT, FILTER, PAN, MIX, LIM + MODE_ROW), 10 main bars when collapsed.
@@ -5696,13 +5695,22 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
     auto drawLegendForMode = [&] (const juce::Rectangle<int>& area,
                                   const juce::String& fullLegend,
                                   const juce::String& shortLegend,
-                                  const juce::String& intOnlyLegend)
+                                  const juce::String& intOnlyLegend,
+                                  bool enabled = true)
     {
+        g.setColour (scheme.text.withMultipliedAlpha (enabled ? 1.0f : 0.35f));
+
         if (tryDrawLegend (area, fullLegend, fullShrinkFloor))
+        {
+            g.setColour (scheme.text);
             return;
+        }
 
         if (tryDrawLegend (area, shortLegend, minFontPx))
+        {
+            g.setColour (scheme.text);
             return;
+        }
 
         g.setFont (kBoldFont40());
         drawValueNoEllipsis (g, area, intOnlyLegend, juce::String(), intOnlyLegend, baseFontPx, minFontPx);
@@ -5798,9 +5806,15 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             &cachedStyleIntOnly,
             &cachedTiltIntOnly
         };
+        const juce::Slider* sliders[kNumBars] = {
+            &inputSlider, &outputSlider, &mixSlider,
+            &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider,
+            &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider
+        };
 
         for (int i = 0; i < kNumBars; ++i)
-            drawLegendForMode (cachedValueAreas_[(size_t) i], *fullTexts[i], *shortTexts[i], *intTexts[i]);
+            drawLegendForMode (cachedValueAreas_[(size_t) i], *fullTexts[i], *shortTexts[i], *intTexts[i],
+                               sliders[i]->isEnabled());
 
         // Filter bar legend
         if (! cachedFilterValueArea_.isEmpty())
@@ -5883,8 +5897,10 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             drawToggleLabel (pdcButton,   "PDC",   pdcCR);
             drawToggleLabel (syncButton,  "SYNC",  syncCR);
             drawToggleLabel (midiButton,  "MIDI",  midiCR);
-            drawToggleLabel (sidechainButton, "SIDECHAIN", W - kToggleLegendCollisionPadPx);
         }
+
+        if (sidechainButton.isVisible())
+            drawToggleLabel (sidechainButton, "SIDECHAIN", W - kToggleLegendCollisionPadPx);
 
         // Mode In / Mode Out / Sum Bus / Limiter Mode labels above combos
         if (modeInCombo.isVisible())
@@ -6056,8 +6072,8 @@ void FREQTRAudioProcessorEditor::resized()
         alignButton.setVisible (false);
         pdcButton.setVisible (false);
         retrigDisplay.setVisible (false);
-        sidechainButton.setVisible (false);
-        sidechainDisplay.setVisible (false);
+        sidechainButton.setVisible (true);
+        sidechainDisplay.setVisible (true);
 
         freqSlider.setBounds (0, 0, 0, 0);
         modSlider.setBounds (0, 0, 0, 0);
@@ -6119,8 +6135,8 @@ void FREQTRAudioProcessorEditor::resized()
         alignButton.setVisible (true);
         pdcButton.setVisible (true);
         retrigDisplay.setVisible (true);
-        sidechainButton.setVisible (true);
-        sidechainDisplay.setVisible (true);
+        sidechainButton.setVisible (false);
+        sidechainDisplay.setVisible (false);
 
         freqSlider.setVisible (true);
         modSlider.setVisible (true);
@@ -6156,10 +6172,12 @@ void FREQTRAudioProcessorEditor::resized()
     const int leftBlockX = buttonAreaX;
     const int rightBlockX = horizontalLayout.leftX + horizontalLayout.barW + horizontalLayout.valuePad;
 
-    alignButton.setBounds (leftBlockX,  verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
-    pdcButton.setBounds   (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
-    syncButton.setBounds  (leftBlockX,  verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
-    midiButton.setBounds  (rightBlockX, verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
+    const int utilityRow1Y = ioSectionExpanded_ ? verticalLayout.btnRow1Y : verticalLayout.btnRow2Y;
+    const int utilityRow2Y = ioSectionExpanded_ ? verticalLayout.btnRow2Y : verticalLayout.btnRow3Y;
+    alignButton.setBounds (leftBlockX,  utilityRow1Y, toggleHitW, verticalLayout.box);
+    pdcButton.setBounds   (rightBlockX, utilityRow1Y, toggleHitW, verticalLayout.box);
+    syncButton.setBounds  (leftBlockX,  utilityRow2Y, toggleHitW, verticalLayout.box);
+    midiButton.setBounds  (rightBlockX, utilityRow2Y, toggleHitW, verticalLayout.box);
     sidechainButton.setBounds (leftBlockX, verticalLayout.btnRow3Y, toggleHitW, verticalLayout.box);
 
     // Retrig tooltip overlay

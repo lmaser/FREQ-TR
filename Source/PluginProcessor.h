@@ -32,7 +32,8 @@ public:
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
 	static constexpr const char* kParamSidechain = "sidechain";
-	static constexpr const char* kParamSidechainSmooth = "sidechain_smooth";
+	static constexpr const char* kParamSidechainTime = "sidechain_time";
+	static constexpr const char* kParamSidechainTone = "sidechain_tone";
 
 	static constexpr const char* kParamFilterHpFreq  = "filter_hp_freq";
 	static constexpr const char* kParamFilterLpFreq  = "filter_lp_freq";
@@ -150,9 +151,12 @@ public:
 	static constexpr float kPolarityMax     =  1.0f;
 	static constexpr float kPolarityDefault =  1.0f;
 
-	static constexpr float kSidechainSmoothMin     = 0.0f;
-	static constexpr float kSidechainSmoothMax     = 1.0f;
-	static constexpr float kSidechainSmoothDefault = 0.25f;
+	static constexpr float kSidechainTimeMin     = 0.0f;
+	static constexpr float kSidechainTimeMax     = 1.0f;
+	static constexpr float kSidechainTimeDefault = 0.25f;
+	static constexpr float kSidechainToneMin     = 250.0f;
+	static constexpr float kSidechainToneMax     = 20000.0f;
+	static constexpr float kSidechainToneDefault = 20000.0f;
 
 	static constexpr float kMixMin     = 0.0f;
 	static constexpr float kMixMax     = 1.0f;
@@ -369,8 +373,13 @@ private:
 	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
 	float smoothedPan = kPanDefault;
 	float smoothedLimThreshold = 1.0f;
-	float sidechainCarrierSmoothL_ = 0.0f;
-	float sidechainCarrierSmoothR_ = 0.0f;
+	float sidechainDcPrevInL_ = 0.0f;
+	float sidechainDcPrevInR_ = 0.0f;
+	float sidechainDcPrevOutL_ = 0.0f;
+	float sidechainDcPrevOutR_ = 0.0f;
+	float sidechainToneStateL_ = 0.0f;
+	float sidechainToneStateR_ = 0.0f;
+	float sidechainRmsEnv_ = 0.0f;
 	float sidechainGateSmoothed_ = 0.0f;
 
 	// ── Feedback state ──
@@ -451,7 +460,8 @@ private:
 	std::atomic<float>* alignParam   = nullptr;
 	std::atomic<float>* pdcParam     = nullptr;
 	std::atomic<float>* sidechainParam = nullptr;
-	std::atomic<float>* sidechainSmoothParam = nullptr;
+	std::atomic<float>* sidechainTimeParam = nullptr;
+	std::atomic<float>* sidechainToneParam = nullptr;
 	std::atomic<float>* filterHpFreqParam  = nullptr;
 	std::atomic<float>* filterLpFreqParam  = nullptr;
 	std::atomic<float>* filterHpSlopeParam = nullptr;

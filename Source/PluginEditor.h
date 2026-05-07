@@ -30,7 +30,7 @@ private:
     void openNumericEntryPopupForSlider (juce::Slider& s);
     void openMidiChannelPrompt();
     void openRetrigPrompt();
-    void openSidechainSmoothPrompt();
+    void openSidechainPrompt();
     void scheduleRetrigTipAutoHide();
     void openFilterPrompt();
     void openChaosConfigPrompt (const char* amtParamId, const char* spdParamId, const juce::String& title);

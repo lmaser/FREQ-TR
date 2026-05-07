@@ -76,9 +76,21 @@ static juce::String formatRetrigTooltip (bool on)
     return juce::String ("RETRIG: ") + (on ? "ON" : "OFF");
 }
 
-static juce::String formatSidechainSmoothTooltip (float smooth)
+static juce::String formatSidechainToneText (float hz)
 {
-    return "SC SMOOTH: x" + juce::String (juce::jlimit (0.0f, 1.0f, smooth), 2);
+    const float clamped = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                        FREQTRAudioProcessor::kSidechainToneMax, hz);
+    if (clamped >= 10000.0f)
+        return juce::String (juce::roundToInt (clamped / 1000.0f)) + "kHz";
+    if (clamped >= 1000.0f)
+        return juce::String (clamped / 1000.0f, 1) + "kHz";
+    return juce::String (juce::roundToInt (clamped)) + "Hz";
+}
+
+static juce::String formatSidechainTooltip (float time, float tone)
+{
+    return "SIDECHAIN: TIME x" + juce::String (juce::jlimit (0.0f, 1.0f, time), 2)
+         + " / TONE " + formatSidechainToneText (tone);
 }
 
 // ── Parameter listener IDs ──
@@ -961,8 +973,9 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     sidechainDisplay.setText ("", juce::dontSendNotification);
     sidechainDisplay.setInterceptsMouseClicks (true, false);
     sidechainDisplay.addMouseListener (this, false);
-    sidechainDisplay.setTooltip (formatSidechainSmoothTooltip (
-        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainSmooth)->load()));
+    sidechainDisplay.setTooltip (formatSidechainTooltip (
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainTime)->load(),
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainTone)->load()));
     sidechainDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     sidechainDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
     sidechainDisplay.setOpaque (false);
@@ -3338,22 +3351,84 @@ void FREQTRAudioProcessorEditor::scheduleRetrigTipAutoHide()
         });
 }
 
-void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
+void FREQTRAudioProcessorEditor::openSidechainPrompt()
 {
     lnf.setScheme (activeScheme);
     const auto scheme = activeScheme;
 
-    const float currentSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
-                                              FREQTRAudioProcessor::kSidechainSmoothMax,
-                                              audioProcessor.apvts.getRawParameterValue (
-                                                  FREQTRAudioProcessor::kParamSidechainSmooth)->load());
+    const float currentTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
+                                            FREQTRAudioProcessor::kSidechainTimeMax,
+                                            audioProcessor.apvts.getRawParameterValue (
+                                                FREQTRAudioProcessor::kParamSidechainTime)->load());
+    const float currentTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                            FREQTRAudioProcessor::kSidechainToneMax,
+                                            audioProcessor.apvts.getRawParameterValue (
+                                                FREQTRAudioProcessor::kParamSidechainTone)->load());
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
-    aw->addTextEditor ("smooth", juce::String (currentSmooth, 2), juce::String());
+    aw->addTextEditor ("time", juce::String (currentTime, 2), juce::String());
+    aw->addTextEditor ("tone", juce::String (juce::roundToInt (currentTone)), juce::String());
 
-    struct SmoothInputFilter : juce::TextEditor::InputFilter
+    struct PromptBar : public juce::Component
     {
+        FREQScheme colours;
+        float value01 = 0.25f;
+        float default01 = 0.25f;
+        std::function<void (float)> onValueChanged;
+
+        PromptBar (const FREQScheme& s, float initial01, float def01)
+            : colours (s),
+              value01 (juce::jlimit (0.0f, 1.0f, initial01)),
+              default01 (juce::jlimit (0.0f, 1.0f, def01)) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (colours.outline);
+            g.drawRect (r, 4.0f);
+
+            const float pad = 7.0f;
+            auto inner = r.reduced (pad);
+            g.setColour (colours.bg);
+            g.fillRect (inner);
+
+            g.setColour (colours.fg);
+            g.fillRect (inner.withWidth (inner.getWidth() * value01));
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override { updateFromMouse (e); }
+        void mouseDrag (const juce::MouseEvent& e) override { updateFromMouse (e); }
+        void mouseDoubleClick (const juce::MouseEvent&) override { setValue (default01); }
+
+        void setValue (float newValue01)
+        {
+            value01 = juce::jlimit (0.0f, 1.0f, newValue01);
+            repaint();
+            if (onValueChanged)
+                onValueChanged (value01);
+        }
+
+    private:
+        void updateFromMouse (const juce::MouseEvent& e)
+        {
+            const float pad = 7.0f;
+            const float innerX = pad;
+            const float innerW = (float) getWidth() - pad * 2.0f;
+            const float next = (innerW > 0.0f) ? ((float) e.x - innerX) / innerW : 0.0f;
+            setValue (next);
+        }
+    };
+
+    struct UnitInputFilter : juce::TextEditor::InputFilter
+    {
+        float maxValue = 1.0f;
+        int maxLength = 4;
+        bool allowDecimal = true;
+
+        UnitInputFilter (float maxVal, int maxLen, bool decimal)
+            : maxValue (maxVal), maxLength (maxLen), allowDecimal (decimal) {}
+
         juce::String filterNewText (juce::TextEditor& editor, const juce::String& newText) override
         {
             const bool existingHasDot = editor.getText().containsChar ('.');
@@ -3364,7 +3439,7 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
             {
                 if (c == '.')
                 {
-                    if (seenDot || existingHasDot)
+                    if (! allowDecimal || seenDot || existingHasDot)
                         continue;
                     seenDot = true;
                     result += c;
@@ -3374,7 +3449,7 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
                     result += c;
                 }
 
-                if (result.length() >= 4)
+                if (result.length() >= maxLength)
                     break;
             }
 
@@ -3383,10 +3458,10 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
             proposed = proposed.substring (0, insertPos) + result
                      + proposed.substring (insertPos + editor.getHighlightedText().length());
 
-            if (proposed.length() > 4 || proposed.getFloatValue() > 1.0f)
+            if (proposed.length() > maxLength || proposed.getFloatValue() > maxValue)
                 return {};
 
-            if (proposed.length() > 1 && proposed[0] == '0' && proposed[1] != '.')
+            if (allowDecimal && proposed.length() > 1 && proposed[0] == '0' && proposed[1] != '.')
                 return {};
 
             return result;
@@ -3394,63 +3469,167 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
     };
 
     const auto& f = kBoldFont40();
-    auto* label = new juce::Label ("sc_smooth_label", "SMOOTH");
-    label->setJustificationType (juce::Justification::centredLeft);
-    applyLabelTextColour (*label, scheme.text);
-    label->setBorderSize (juce::BorderSize<int> (0));
-    label->setFont (f);
-    aw->addAndMakeVisible (label);
 
-    auto* unit = new juce::Label ("sc_smooth_unit", "x");
-    unit->setJustificationType (juce::Justification::centredLeft);
-    applyLabelTextColour (*unit, scheme.text);
-    unit->setBorderSize (juce::BorderSize<int> (0));
-    unit->setFont (f);
-    aw->addAndMakeVisible (unit);
+    auto makeLabel = [&] (const juce::String& name, const juce::String& text)
+    {
+        auto* l = new juce::Label (name, text);
+        l->setJustificationType (juce::Justification::centredLeft);
+        applyLabelTextColour (*l, scheme.text);
+        l->setBorderSize (juce::BorderSize<int> (0));
+        l->setFont (f);
+        aw->addAndMakeVisible (l);
+        return l;
+    };
 
-    if (auto* te = aw->getTextEditor ("smooth"))
+    auto* timeLabel = makeLabel ("sc_time_label", "TIME");
+    auto* toneLabel = makeLabel ("sc_tone_label", "TONE");
+    auto* timeUnit = makeLabel ("sc_time_unit", "x");
+    auto* toneUnit = makeLabel ("sc_tone_unit", "Hz");
+
+    const float toneLogMin = std::log (FREQTRAudioProcessor::kSidechainToneMin);
+    const float toneLogRange = std::log (FREQTRAudioProcessor::kSidechainToneMax) - toneLogMin;
+    auto toneToBar = [toneLogMin, toneLogRange] (float hz)
+    {
+        const float clamped = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                            FREQTRAudioProcessor::kSidechainToneMax, hz);
+        return (std::log (clamped) - toneLogMin) / toneLogRange;
+    };
+    auto barToTone = [toneLogMin, toneLogRange] (float value01)
+    {
+        return std::exp (toneLogMin + juce::jlimit (0.0f, 1.0f, value01) * toneLogRange);
+    };
+
+    auto* timeBar = new PromptBar (scheme, currentTime, FREQTRAudioProcessor::kSidechainTimeDefault);
+    auto* toneBar = new PromptBar (scheme, toneToBar (currentTone), toneToBar (FREQTRAudioProcessor::kSidechainToneDefault));
+    aw->addAndMakeVisible (timeBar);
+    aw->addAndMakeVisible (toneBar);
+
+    if (auto* te = aw->getTextEditor ("time"))
     {
         te->setFont (f);
         te->applyFontToAllText (f);
-        te->setInputFilter (new SmoothInputFilter(), true);
+        te->setInputFilter (new UnitInputFilter (1.0f, 4, true), true);
+    }
+    if (auto* te = aw->getTextEditor ("tone"))
+    {
+        te->setFont (f);
+        te->applyFontToAllText (f);
+        te->setInputFilter (new UnitInputFilter (FREQTRAudioProcessor::kSidechainToneMax, 5, false), true);
     }
 
-    auto layoutRow = [aw, label, unit]()
+    auto syncing = std::make_shared<bool> (false);
+
+    auto layoutRows = [aw, timeLabel, toneLabel, timeUnit, toneUnit, timeBar, toneBar]()
     {
-        auto* te = aw->getTextEditor ("smooth");
-        if (te == nullptr || label == nullptr || unit == nullptr)
+        auto* timeTe = aw->getTextEditor ("time");
+        auto* toneTe = aw->getTextEditor ("tone");
+        if (timeTe == nullptr || toneTe == nullptr
+            || timeLabel == nullptr || toneLabel == nullptr
+            || timeUnit == nullptr || toneUnit == nullptr
+            || timeBar == nullptr || toneBar == nullptr)
             return;
 
         const int buttonsTop = getAlertButtonsTop (*aw);
-        auto er = te->getBounds();
-        er.setHeight ((int) (te->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
-        const int rowY = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - er.getHeight()) / 2);
+        auto er = timeTe->getBounds();
+        er.setHeight ((int) (timeTe->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
+        const int rowH = er.getHeight();
+        const int barH = juce::jmax (12, rowH / 2);
+        const int barGap = juce::jmax (4, rowH / 4);
+        const int rowTotal = rowH + barGap + barH;
+        const int rowGap = juce::jmax (4, rowH / 3);
+        const int totalH = rowTotal * 2 + rowGap;
+        const int rowY = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - totalH) / 2);
 
         const int contentPad = kPromptInlineContentPadPx;
         const int contentW = aw->getWidth() - contentPad * 2;
-        const int labelW = stringWidth (label->getFont(), label->getText()) + 2;
-        const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
-        const int unitW = stringWidth (unit->getFont(), unit->getText()) + 2;
-        const int spaceW = juce::jmax (2, stringWidth (te->getFont(), " "));
-        const int editorW = juce::jlimit (36, 88, textW + 24);
-        const int visualW = labelW + spaceW + editorW + unitW;
-        const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
+        const int maxLabelW = juce::jmax (stringWidth (timeLabel->getFont(), timeLabel->getText()),
+                                          stringWidth (toneLabel->getFont(), toneLabel->getText())) + 2;
+        const int maxUnitW = juce::jmax (stringWidth (timeUnit->getFont(), timeUnit->getText()),
+                                         stringWidth (toneUnit->getFont(), toneUnit->getText())) + 2;
+        const int spaceW = juce::jmax (2, stringWidth (timeTe->getFont(), " "));
 
-        label->setBounds (blockLeft, rowY, labelW, er.getHeight());
-        er.setBounds (blockLeft + labelW + spaceW, rowY, editorW, er.getHeight());
-        te->setBounds (er);
-        unit->setBounds (er.getRight(), rowY, unitW, er.getHeight());
+        auto placeRow = [&] (juce::TextEditor* te, juce::Label* name, juce::Label* unit,
+                             PromptBar* bar, int y)
+        {
+            const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
+            const int editorW = juce::jlimit (36, 112, textW + 24);
+            const int visualW = maxLabelW + spaceW + editorW + maxUnitW;
+            const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
+
+            name->setBounds (blockLeft, y, maxLabelW, rowH);
+            auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + spaceW, y, editorW, rowH);
+            te->setBounds (textBounds);
+            unit->setBounds (textBounds.getRight(), y, maxUnitW, rowH);
+            bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
+        };
+
+        placeRow (timeTe, timeLabel, timeUnit, timeBar, rowY);
+        placeRow (toneTe, toneLabel, toneUnit, toneBar, rowY + rowTotal + rowGap);
     };
 
-    if (auto* te = aw->getTextEditor ("smooth"))
-        te->onTextChange = [layoutRow]() { layoutRow(); };
+    timeBar->onValueChanged = [aw, syncing, layoutRows] (float value01)
+    {
+        if (*syncing)
+            return;
+
+        *syncing = true;
+        if (auto* te = aw->getTextEditor ("time"))
+        {
+            te->setText (juce::String (value01, 2), juce::sendNotification);
+            te->selectAll();
+        }
+        *syncing = false;
+        layoutRows();
+    };
+
+    toneBar->onValueChanged = [aw, syncing, layoutRows, barToTone] (float value01)
+    {
+        if (*syncing)
+            return;
+
+        *syncing = true;
+        if (auto* te = aw->getTextEditor ("tone"))
+        {
+            te->setText (juce::String (juce::roundToInt (barToTone (value01))), juce::sendNotification);
+            te->selectAll();
+        }
+        *syncing = false;
+        layoutRows();
+    };
+
+    if (auto* te = aw->getTextEditor ("time"))
+        te->onTextChange = [aw, timeBar, syncing, layoutRows]()
+        {
+            if (*syncing)
+                return;
+
+            *syncing = true;
+            if (auto* editor = aw->getTextEditor ("time"))
+                timeBar->setValue (juce::jlimit (0.0f, 1.0f, editor->getText().getFloatValue()));
+            *syncing = false;
+            layoutRows();
+        };
+
+    if (auto* te = aw->getTextEditor ("tone"))
+        te->onTextChange = [aw, toneBar, syncing, layoutRows, toneToBar]()
+        {
+            if (*syncing)
+                return;
+
+            *syncing = true;
+            if (auto* editor = aw->getTextEditor ("tone"))
+                toneBar->setValue (toneToBar (editor->getText().getFloatValue()));
+            *syncing = false;
+            layoutRows();
+        };
 
     aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
     aw->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     applyPromptShellSize (*aw);
     layoutAlertWindowButtons (*aw);
-    preparePromptTextEditor (*aw, "smooth", scheme.bg, scheme.text, scheme.fg, f, false);
-    layoutRow();
+    preparePromptTextEditor (*aw, "time", scheme.bg, scheme.text, scheme.fg, f, false);
+    preparePromptTextEditor (*aw, "tone", scheme.bg, scheme.text, scheme.fg, f, false);
+    layoutRows();
     styleAlertButtons (*aw, lnf);
 
     juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
@@ -3458,11 +3637,11 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
 
     if (safeThis != nullptr)
     {
-        fitAlertWindowToEditor (*aw, safeThis.getComponent(), [layoutRow] (juce::AlertWindow& a)
+        fitAlertWindowToEditor (*aw, safeThis.getComponent(), [layoutRows] (juce::AlertWindow& a)
         {
             juce::ignoreUnused (a);
             layoutAlertWindowButtons (a);
-            layoutRow();
+            layoutRows();
         });
         embedAlertWindowInOverlay (safeThis.getComponent(), aw);
     }
@@ -3474,7 +3653,7 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
 
     aw->enterModalState (true,
         juce::ModalCallbackFunction::create (
-            [safeThis, aw, savedSmooth = currentSmooth] (int result) mutable
+            [safeThis, aw, savedTime = currentTime, savedTone = currentTone] (int result) mutable
         {
             std::unique_ptr<juce::AlertWindow> killer (aw);
 
@@ -3484,19 +3663,26 @@ void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
             if (safeThis == nullptr)
                 return;
 
-            float newSmooth = savedSmooth;
+            float newTime = savedTime;
+            float newTone = savedTone;
             if (result == 1)
             {
-                if (auto* te = aw->getTextEditor ("smooth"))
-                    newSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
-                                              FREQTRAudioProcessor::kSidechainSmoothMax,
-                                              te->getText().getFloatValue());
+                if (auto* te = aw->getTextEditor ("time"))
+                    newTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
+                                            FREQTRAudioProcessor::kSidechainTimeMax,
+                                            te->getText().getFloatValue());
+                if (auto* te = aw->getTextEditor ("tone"))
+                    newTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                            FREQTRAudioProcessor::kSidechainToneMax,
+                                            te->getText().getFloatValue());
 
-                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainSmooth))
-                    p->setValueNotifyingHost (p->convertTo0to1 (newSmooth));
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTime))
+                    p->setValueNotifyingHost (p->convertTo0to1 (newTime));
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTone))
+                    p->setValueNotifyingHost (p->convertTo0to1 (newTone));
             }
 
-            safeThis->sidechainDisplay.setTooltip (formatSidechainSmoothTooltip (newSmooth));
+            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (newTime, newTone));
         }),
         false);
 }
@@ -4966,7 +5152,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         && (getSidechainLabelArea().contains (pt) || sidechainDisplay.getBounds().contains (pt)))
     {
         if (e.mods.isPopupMenu())
-            openSidechainSmoothPrompt();
+            openSidechainPrompt();
         else
             sidechainButton.setToggleState (! sidechainButton.getToggleState(), juce::sendNotificationSync);
         updateSidechainDependentControls();
@@ -5351,7 +5537,7 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getPdcLabelArea() const
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getSidechainLabelArea() const
 {
-    return makeToggleLabelArea (sidechainButton, midiButton.getX() - kToggleLegendCollisionPadPx, "SC", "SC");
+    return makeToggleLabelArea (sidechainButton, getWidth() - kToggleLegendCollisionPadPx, "SIDECHAIN", "SC");
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getInfoIconArea() const
@@ -5645,7 +5831,7 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             drawToggleLabel (pdcButton,   "PDC",   pdcCR);
             drawToggleLabel (syncButton,  "SYNC",  syncCR);
             drawToggleLabel (midiButton,  "MIDI",  midiCR);
-            drawToggleLabel (sidechainButton, "SC", syncCR);
+            drawToggleLabel (sidechainButton, "SIDECHAIN", W - kToggleLegendCollisionPadPx);
         }
 
         // Mode In / Mode Out / Sum Bus / Limiter Mode labels above combos

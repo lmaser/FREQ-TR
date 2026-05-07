@@ -124,7 +124,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, JIT, COMB, ENGINE, WIN, HARM, POLARITY, STYLE, TILT, PAN, LIMTHRESHOLD
+    // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, WIN, HARM, POLARITY, JIT, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;

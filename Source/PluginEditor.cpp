@@ -749,7 +749,7 @@ void FREQTRAudioProcessorEditor::DualMixBarComponent::mouseMove (const juce::Mou
 FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
 : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
 
     useCustomPalette = audioProcessor.getUiUseCustomPalette();
     crtEnabled = audioProcessor.getUiCrtEnabled();
@@ -1091,7 +1091,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     dismissEditorOwnedModalPrompts (lnf);
     setPromptOverlayActive (false);
 
-    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
+    const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
     for (auto* slider : barSliders)
         slider->removeListener (this);
 
@@ -1203,8 +1203,8 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
     const bool enableControls = ! shouldBeActive;
     const std::array<juce::Component*, 18> interactiveControls {
         &inputSlider, &outputSlider, &mixSlider,
-        &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider,
-        &polaritySlider, &styleSlider,
+        &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider,
+        &polaritySlider, &jitterSlider, &styleSlider,
         &syncButton, &midiButton, &alignButton, &pdcButton, &sidechainButton
     };
     for (auto* control : interactiveControls)
@@ -3518,6 +3518,30 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     }
 
     auto syncing = std::make_shared<bool> (false);
+    juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+
+    auto setSidechainParam = [safeThis] (const char* paramId, float plainValue)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        if (auto* p = safeThis->audioProcessor.apvts.getParameter (paramId))
+            p->setValueNotifyingHost (p->convertTo0to1 (plainValue));
+    };
+
+    auto pushSidechainValues = [safeThis, setSidechainParam] (float time, float tone)
+    {
+        const float clampedTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
+                                                FREQTRAudioProcessor::kSidechainTimeMax, time);
+        const float clampedTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                                FREQTRAudioProcessor::kSidechainToneMax, tone);
+
+        setSidechainParam (FREQTRAudioProcessor::kParamSidechainTime, clampedTime);
+        setSidechainParam (FREQTRAudioProcessor::kParamSidechainTone, clampedTone);
+
+        if (safeThis != nullptr)
+            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (clampedTime, clampedTone));
+    };
 
     auto layoutRows = [aw, timeLabel, toneLabel, timeUnit, toneUnit, timeBar, toneBar]()
     {
@@ -3540,26 +3564,28 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         const int totalH = rowTotal * 2 + rowGap;
         const int rowY = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - totalH) / 2);
 
-        const int contentPad = kPromptInlineContentPadPx;
+        const int contentPad = kPromptInnerMargin;
         const int contentW = aw->getWidth() - contentPad * 2;
         const int maxLabelW = juce::jmax (stringWidth (timeLabel->getFont(), timeLabel->getText()),
-                                          stringWidth (toneLabel->getFont(), toneLabel->getText())) + 2;
+                                          stringWidth (toneLabel->getFont(), toneLabel->getText())) + 8;
         const int maxUnitW = juce::jmax (stringWidth (timeUnit->getFont(), timeUnit->getText()),
-                                         stringWidth (toneUnit->getFont(), toneUnit->getText())) + 2;
-        const int spaceW = juce::jmax (2, stringWidth (timeTe->getFont(), " "));
+                                         stringWidth (toneUnit->getFont(), toneUnit->getText())) + 8;
+        const int spaceW = juce::jmax (6, stringWidth (timeTe->getFont(), " "));
 
         auto placeRow = [&] (juce::TextEditor* te, juce::Label* name, juce::Label* unit,
                              PromptBar* bar, int y)
         {
             const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
-            const int editorW = juce::jlimit (36, 112, textW + 24);
-            const int visualW = maxLabelW + spaceW + editorW + maxUnitW;
+            const bool isToneRow = te == toneTe;
+            const int worstTextW = stringWidth (te->getFont(), isToneRow ? "20000" : "1.00");
+            const int editorW = juce::jmax (36, juce::jmax (textW, worstTextW) + 18);
+            const int visualW = maxLabelW + spaceW + editorW + spaceW + maxUnitW;
             const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
 
             name->setBounds (blockLeft, y, maxLabelW, rowH);
             auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + spaceW, y, editorW, rowH);
             te->setBounds (textBounds);
-            unit->setBounds (textBounds.getRight(), y, maxUnitW, rowH);
+            unit->setBounds (textBounds.getRight() + spaceW, y, maxUnitW, rowH);
             bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
         };
 
@@ -3567,7 +3593,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         placeRow (toneTe, toneLabel, toneUnit, toneBar, rowY + rowTotal + rowGap);
     };
 
-    timeBar->onValueChanged = [aw, syncing, layoutRows] (float value01)
+    timeBar->onValueChanged = [aw, toneBar, syncing, layoutRows, pushSidechainValues, barToTone] (float value01)
     {
         if (*syncing)
             return;
@@ -3579,47 +3605,62 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             te->selectAll();
         }
         *syncing = false;
+        pushSidechainValues (value01, barToTone (toneBar->value01));
         layoutRows();
     };
 
-    toneBar->onValueChanged = [aw, syncing, layoutRows, barToTone] (float value01)
+    toneBar->onValueChanged = [aw, timeBar, syncing, layoutRows, pushSidechainValues, barToTone] (float value01)
     {
         if (*syncing)
             return;
 
         *syncing = true;
+        const float toneHz = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                           FREQTRAudioProcessor::kSidechainToneMax,
+                                           barToTone (value01));
         if (auto* te = aw->getTextEditor ("tone"))
         {
-            te->setText (juce::String (juce::roundToInt (barToTone (value01))), juce::sendNotification);
+            te->setText (juce::String (juce::roundToInt (toneHz)), juce::sendNotification);
             te->selectAll();
         }
         *syncing = false;
+        pushSidechainValues (timeBar->value01, toneHz);
         layoutRows();
     };
 
     if (auto* te = aw->getTextEditor ("time"))
-        te->onTextChange = [aw, timeBar, syncing, layoutRows]()
+        te->onTextChange = [aw, timeBar, toneBar, syncing, layoutRows, pushSidechainValues, barToTone]()
         {
             if (*syncing)
                 return;
 
             *syncing = true;
+            float nextTime = FREQTRAudioProcessor::kSidechainTimeMin;
             if (auto* editor = aw->getTextEditor ("time"))
-                timeBar->setValue (juce::jlimit (0.0f, 1.0f, editor->getText().getFloatValue()));
+                nextTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
+                                         FREQTRAudioProcessor::kSidechainTimeMax,
+                                         editor->getText().getFloatValue());
+            timeBar->setValue (nextTime);
             *syncing = false;
+            pushSidechainValues (nextTime, barToTone (toneBar->value01));
             layoutRows();
         };
 
     if (auto* te = aw->getTextEditor ("tone"))
-        te->onTextChange = [aw, toneBar, syncing, layoutRows, toneToBar]()
+        te->onTextChange = [aw, timeBar, toneBar, syncing, layoutRows, pushSidechainValues, toneToBar]()
         {
             if (*syncing)
                 return;
 
             *syncing = true;
+            float nextTone = FREQTRAudioProcessor::kSidechainToneMin;
             if (auto* editor = aw->getTextEditor ("tone"))
-                toneBar->setValue (toneToBar (editor->getText().getFloatValue()));
+                nextTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                         FREQTRAudioProcessor::kSidechainToneMax,
+                                         editor->getText().getFloatValue());
+            toneBar->setValue (toneToBar (nextTone));
             *syncing = false;
+            pushSidechainValues (timeBar->value01, nextTone);
             layoutRows();
         };
 
@@ -3632,7 +3673,6 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     layoutRows();
     styleAlertButtons (*aw, lnf);
 
-    juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
     setPromptOverlayActive (true);
 
     if (safeThis != nullptr)
@@ -3663,9 +3703,18 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             if (safeThis == nullptr)
                 return;
 
+            if (result != 1)
+            {
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTime))
+                    p->setValueNotifyingHost (p->convertTo0to1 (savedTime));
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTone))
+                    p->setValueNotifyingHost (p->convertTo0to1 (savedTone));
+                safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (savedTime, savedTone));
+                return;
+            }
+
             float newTime = savedTime;
             float newTone = savedTone;
-            if (result == 1)
             {
                 if (auto* te = aw->getTextEditor ("time"))
                     newTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
@@ -5363,8 +5412,8 @@ void FREQTRAudioProcessorEditor::updateCachedLayout()
     cachedVLayout_ = buildVerticalLayout (getHeight(), kLayoutVerticalBiasPx, ioSectionExpanded_);
 
     const juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
-                                               &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider,
-        &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
+                                               &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider,
+        &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
     {
@@ -5503,8 +5552,8 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getValueAreaFor (const juce::Re
 juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Point<int> p)
 {
     juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
-                                         &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider,
-        &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &styleSlider, &tiltSlider };
+                                         &freqSlider, &modSlider, &feedbackSlider, &combSlider, &engineSlider,
+        &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
@@ -5725,11 +5774,11 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
     // ── Bar legends ──
     {
         const juce::String* fullTexts[kNumBars]  = { &cachedInputTextFull, &cachedOutputTextFull, &cachedMixTextFull,
-                                                      &cachedFreqTextFull, &cachedModTextFull, &cachedFeedbackTextFull, &cachedJitterTextFull, &cachedCombTextFull,
-        &cachedEngineTextFull, &cachedWindowTextFull, &cachedHarmTextFull, &cachedPolarityTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
+                                                      &cachedFreqTextFull, &cachedModTextFull, &cachedFeedbackTextFull, &cachedCombTextFull, &cachedEngineTextFull,
+        &cachedWindowTextFull, &cachedHarmTextFull, &cachedPolarityTextFull, &cachedJitterTextFull, &cachedStyleTextFull, &cachedTiltTextFull };
         const juce::String* shortTexts[kNumBars] = { &cachedInputTextShort, &cachedOutputTextShort, &cachedMixTextShort,
-                                                      &cachedFreqTextShort, &cachedModTextShort, &cachedFeedbackTextShort, &cachedJitterTextShort, &cachedCombTextShort,
-        &cachedEngineTextShort, &cachedWindowTextShort, &cachedHarmTextShort, &cachedPolarityTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
+                                                      &cachedFreqTextShort, &cachedModTextShort, &cachedFeedbackTextShort, &cachedCombTextShort, &cachedEngineTextShort,
+        &cachedWindowTextShort, &cachedHarmTextShort, &cachedPolarityTextShort, &cachedJitterTextShort, &cachedStyleTextShort, &cachedTiltTextShort };
         const juce::String* intTexts[kNumBars] = {
             &cachedInputIntOnly,
             &cachedOutputIntOnly,
@@ -5737,12 +5786,12 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             &cachedFreqIntOnly,
             &cachedModIntOnly,
             &cachedFeedbackIntOnly,
-            &cachedJitterIntOnly,
             &cachedCombIntOnly,
             &cachedEngineIntOnly,
             &cachedWindowIntOnly,
             &cachedHarmIntOnly,
             &cachedPolarityIntOnly,
+            &cachedJitterIntOnly,
             &cachedStyleIntOnly,
             &cachedTiltIntOnly
         };
@@ -6084,12 +6133,12 @@ void FREQTRAudioProcessorEditor::resized()
         freqSlider.setBounds     (horizontalLayout.leftX, mainTop + 0 * step, horizontalLayout.barW, verticalLayout.barH);
         modSlider.setBounds      (horizontalLayout.leftX, mainTop + 1 * step, horizontalLayout.barW, verticalLayout.barH);
         feedbackSlider.setBounds (horizontalLayout.leftX, mainTop + 2 * step, horizontalLayout.barW, verticalLayout.barH);
-        jitterSlider.setBounds   (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
-        combSlider.setBounds     (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
-        engineSlider.setBounds   (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
-        windowSlider.setBounds   (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
-        harmSlider.setBounds     (horizontalLayout.leftX, mainTop + 7 * step, horizontalLayout.barW, verticalLayout.barH);
-        polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 8 * step, horizontalLayout.barW, verticalLayout.barH);
+        combSlider.setBounds     (horizontalLayout.leftX, mainTop + 3 * step, horizontalLayout.barW, verticalLayout.barH);
+        engineSlider.setBounds   (horizontalLayout.leftX, mainTop + 4 * step, horizontalLayout.barW, verticalLayout.barH);
+        windowSlider.setBounds   (horizontalLayout.leftX, mainTop + 5 * step, horizontalLayout.barW, verticalLayout.barH);
+        harmSlider.setBounds     (horizontalLayout.leftX, mainTop + 6 * step, horizontalLayout.barW, verticalLayout.barH);
+        polaritySlider.setBounds (horizontalLayout.leftX, mainTop + 7 * step, horizontalLayout.barW, verticalLayout.barH);
+        jitterSlider.setBounds   (horizontalLayout.leftX, mainTop + 8 * step, horizontalLayout.barW, verticalLayout.barH);
         styleSlider.setBounds    (horizontalLayout.leftX, mainTop + 9 * step, horizontalLayout.barW, verticalLayout.barH);
     }
 

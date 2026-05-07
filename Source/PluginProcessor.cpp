@@ -52,11 +52,11 @@ namespace
 
 
 	// ── Hilbert FIR coefficient generation ──
-	// Windowed-sinc design: h[n] = (2 / (n*pi)) * sin^2(n*pi/2)  for odd n, 0 for even
-	// Windowed with Blackman to suppress sidelobes.
-	inline void designHilbertFIR (float* coeffs, int order)
+	// Odd-length windowed-sinc design: h[n] = 2 / (n*pi) for odd n, 0 for even.
+	// The odd length is required so folded taps are truly antisymmetric.
+	inline void designHilbertFIR (float* coeffs, int length)
 	{
-		const int M = order;
+		const int M = length;
 		const int half = M / 2;
 
 		for (int i = 0; i < M; ++i)
@@ -357,10 +357,10 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 	// ── Design Hilbert FIR and build folded taps ──
 	{
-		std::vector<float> coeffs ((size_t) kHilbertOrder, 0.0f);
-		designHilbertFIR (coeffs.data(), kHilbertOrder);
+		std::vector<float> coeffs ((size_t) kHilbertFirLength, 0.0f);
+		designHilbertFIR (coeffs.data(), kHilbertFirLength);
 
-		const int half = kHilbertOrder / 2;
+		const int half = kHilbertFirLength / 2;
 		hilbertFoldedTaps.clear();
 
 		// Exploit antisymmetry: h[k] = -h[N-1-k] for nonzero taps.
@@ -511,7 +511,6 @@ void FREQTRAudioProcessor::resetJitterState() noexcept
 	jitterStereo_ = false;
 	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
 	jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
-	jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 	jitterFeedbackOut_ = 0.0f;
 	jitterFeedbackDepth_ = 0.0f;
 	jitterCombOut_ = 0.0f;
@@ -528,7 +527,6 @@ void FREQTRAudioProcessor::resetJitterState() noexcept
 
 	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
 	jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
-	jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 	jitterFeedbackOut_ = 0.0f;
 	jitterFeedbackDepth_ = 0.0f;
 	jitterCombOut_ = 0.0f;
@@ -848,7 +846,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	feedbackSmoothed.setTargetValue (targetFeedback);
 
 	const int order = kHilbertOrder;
-	const int half  = order / 2;
+	const int firLength = kHilbertFirLength;
+	const int half  = kHilbertDelay;
 	const float invSr = 1.0f / (float) currentSampleRate;
 
 	float* writeL = (numChannels > 0) ? buffer.getWritePointer (0) : nullptr;
@@ -947,6 +946,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int modeInVal  = loadIntParamOrDefault (modeInParam,  kModeInOutDefault);
 	const int modeOutVal = loadIntParamOrDefault (modeOutParam, kModeInOutDefault);
 	const int sumBusVal  = loadIntParamOrDefault (sumBusParam,  kSumBusDefault);
+	double syncPhaseAccumL = syncRetrigPhase;
+	double syncPhaseAccumR = syncRetrigPhase;
 
 	for (int n = 0; n < numSamples; ++n)
 	{
@@ -970,14 +971,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			               calcJitterFrequencyDelaySamples (baseFreqR),
 			               smoothedComb_);
 
-		const float jitteredFreqL = baseFreqL * getJitterFreqMultiplier (0);
-		const float jitteredFreqR = baseFreqR * getJitterFreqMultiplier (1);
+		const float jitteredFreqL = getJitteredFrequencyHz (baseFreqL, 0);
+		const float jitteredFreqR = getJitteredFrequencyHz (baseFreqR, 1);
 
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
 		{
-			oscPhase = syncRetrigPhase + (double) baseFreqL * ((double) n * (double) invSr)
-				+ (double) getJitterSyncPhaseOffset (0);
+			oscPhase = syncPhaseAccumL;
 			oscPhase -= std::floor (oscPhase);
 		}
 
@@ -985,8 +985,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// WIDE uses the same oscillator as L (opposite sideband, not different rate)
 		if (useSyncRetrigPhase)
 		{
-			oscPhaseR = syncRetrigPhase + (double) baseFreqR * ((double) n * (double) invSr)
-				+ (double) getJitterSyncPhaseOffset (1);
+			oscPhaseR = syncPhaseAccumR;
 			oscPhaseR -= std::floor (oscPhaseR);
 		}
 
@@ -1140,7 +1139,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		for (const auto& tap : hilbertFoldedTaps)
 		{
 			const int i1 = (hilbertPos - tap.offset + order) & (order - 1);
-			const int i2 = (hilbertPos - (order - 1 - tap.offset) + order) & (order - 1);
+			const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & (order - 1);
 			const float diffL = hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2];
 			const float diffR = hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2];
 			hilbL += tap.coeff * diffL;
@@ -1166,7 +1165,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float oscWaveR    = harmPairR.sine   * harmGainR;
 		const float oscWaveCosR = harmPairR.cosine * harmGainR;
 
-		// ── Engine blend: AM (0) ↔ Freq Shift (1) ──
+		// ── Engine blend: AM (0) -> RM (0.5) -> Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
 		float wetL, wetR;
 
@@ -1177,13 +1176,23 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 		else
 		{
-			// AM: input × wave (ring modulation at engine=0)
-			const float amL = realL * oscWave;
-			const float amR = useStereoInput
-				? (style == 2 ? (realR * -oscWave)
-				  : (style == 3 ? (realR * oscWaveR)
-				                : (realR * oscWave)))
-				: amL;
+			// AM uses a unipolar carrier; RM keeps the bipolar multiplication.
+			const auto amEnvelope = [] (float carrier) noexcept
+			{
+				return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, carrier);
+			};
+
+			const float carrierL = oscWave;
+			const float carrierR = useStereoInput
+				? (style == 2 ? -oscWave
+				  : (style == 3 ? oscWaveR
+				                : oscWave))
+				: carrierL;
+
+			const float amL = realL * amEnvelope (carrierL);
+			const float amR = useStereoInput ? (realR * amEnvelope (carrierR)) : amL;
+			const float rmL = realL * carrierL;
+			const float rmR = useStereoInput ? (realR * carrierR) : rmL;
 
 			// Freq Shift: Re[ analytic × e^(j2πft) ] = real·cos − hilbert·sin
 			const float fsL = realL * oscWaveCos - hilbL * oscWave;
@@ -1193,8 +1202,19 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				                : (realR * oscWaveCos - hilbR * oscWave)))
 				: fsL;
 
-			wetL = amL + smoothedEngine * (fsL - amL);
-			wetR = amR + smoothedEngine * (fsR - amR);
+			const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);
+			if (enginePos < 0.5f)
+			{
+				const float t = enginePos * 2.0f;
+				wetL = amL + t * (rmL - amL);
+				wetR = amR + t * (rmR - amR);
+			}
+			else
+			{
+				const float t = (enginePos - 0.5f) * 2.0f;
+				wetL = rmL + t * (fsL - rmL);
+				wetR = rmR + t * (fsR - rmR);
+			}
 		}
 
 		// Write conditioned wet into feedback delay line
@@ -1410,8 +1430,18 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (writeL != nullptr) writeL[n] = outL;
 		if (writeR != nullptr) writeR[n] = outR;
 
-		// Advance oscillator phase (free-running mode only)
-		if (! useSyncRetrigPhase)
+		// Advance oscillator phase
+		if (useSyncRetrigPhase)
+		{
+			syncPhaseAccumL += (double) jitteredFreqL * (double) invSr;
+			syncPhaseAccumL -= std::floor (syncPhaseAccumL);
+			oscPhase = syncPhaseAccumL;
+
+			syncPhaseAccumR += (double) jitteredFreqR * (double) invSr;
+			syncPhaseAccumR -= std::floor (syncPhaseAccumR);
+			oscPhaseR = syncPhaseAccumR;
+		}
+		else
 		{
 			oscPhase += (double) jitteredFreqL * (double) invSr;
 			oscPhase -= std::floor (oscPhase);
@@ -1517,7 +1547,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamComb, "Comb",
 		juce::NormalisableRange<float> (kCombMin, kCombMax, 0.01f, 0.35f), kCombDefault));
-	// Engine: 0 = AM, 1 = Freq Shift (continuous blend)
+	// Engine: 0 = AM, 0.5 = Ring Mod, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",
 		juce::NormalisableRange<float> (kEngineMin, kEngineMax, 0.0f, 1.0f), kEngineDefault));

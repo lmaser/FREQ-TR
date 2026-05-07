@@ -104,12 +104,13 @@ public:
 	static constexpr float kCombMax     = 750.0f;
 	static constexpr float kCombDefault = 5.0f;
 
-	static constexpr int kHilbertOrder = 128;
-	static constexpr int kHilbertDelay = kHilbertOrder / 2;
+	static constexpr int kHilbertOrder = 512;          // Power-of-two circular buffer size.
+	static constexpr int kHilbertFirLength = 511;      // Odd FIR length for true antisymmetry.
+	static constexpr int kHilbertDelay = kHilbertFirLength / 2;
 
 	static constexpr float kEngineMin     = 0.0f;
 	static constexpr float kEngineMax     = 1.0f;
-	static constexpr float kEngineDefault = 0.0f;   // 0 = AM, 1 = Freq Shift
+	static constexpr float kEngineDefault = 0.0f;   // 0 = AM, 0.5 = Ring Mod, 1 = Freq Shift
 
 	static constexpr int kStyleMin     = 0;
 	static constexpr int kStyleMax     = 3;         // 0 = MONO, 1 = STEREO, 2 = WIDE, 3 = DUAL
@@ -277,7 +278,7 @@ private:
 	std::vector<float> cleanDelayBufL, cleanDelayBufR; // feedback-free delay for dry ref
 	int hilbertPos = 0;                                // write position in circular buffers
 
-	// Folded Hilbert taps: exploit antisymmetry + zero-skip (128 → ~32 MACs)
+	// Folded Hilbert taps: exploit antisymmetry + zero-skip (511 -> ~127 MACs)
 	struct HilbertTap { int offset; float coeff; };
 	std::vector<HilbertTap> hilbertFoldedTaps;
 
@@ -320,7 +321,7 @@ private:
 	HarmonicOscPair fastHarmonicOscPair (float phase, float harmonicCount) const noexcept;
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
-	float smoothedEngine = 0.0f;   // EMA-smoothed AM↔FreqShift blend
+	float smoothedEngine = 0.0f;   // EMA-smoothed AM->RM->FreqShift blend
 	float smoothedHarm = 0.0f;     // EMA-smoothed harmonic density
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 	float smoothedDryLevel = kDryLevelDefault;
@@ -628,7 +629,8 @@ private:
 	static constexpr float kJitterFeedbackFastShortnessWeight = 0.28f;
 	static constexpr float kJitterFeedbackOutputLimit = 1.0f;
 	static constexpr float kJitterFrequencyDepthScale = 2.0f;
-	static constexpr float kJitterSyncPhaseDepthScale = 0.028f;
+	static constexpr float kJitterFrequencyFloorHz = 60.0f;
+	static constexpr float kJitterFrequencyBypassHz = 0.01f;
 
 	float jitterTargetNorm_              = 0.0f;
 	float jitterAmountSmoothed_          = 0.0f;
@@ -639,7 +641,6 @@ private:
 
 	float jitterFreqOut_[2]              = {};
 	float jitterFreqDepthOct_[2]         = {};
-	float jitterSyncPhaseDepth_[2]       = {};
 	float jitterFeedbackOut_             = 0.0f;
 	float jitterFeedbackDepth_           = 0.0f;
 	float jitterCombOut_                 = 0.0f;
@@ -893,7 +894,6 @@ private:
 			jitterActive_ = false;
 			jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
 			jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
-			jitterSyncPhaseDepth_[0] = jitterSyncPhaseDepth_[1] = 0.0f;
 			jitterFeedbackOut_ = 0.0f;
 			jitterFeedbackDepth_ = 0.0f;
 			jitterCombOut_ = 0.0f;
@@ -914,14 +914,12 @@ private:
 			const JitterMetrics metrics = makeJitterMetrics (freqDelaySamples[ch], amt, sr, ch);
 			jitterFreqOut_[ch] = advanceJitterModulator (jitterFreqMod_[ch], metrics, sr, ch);
 			jitterFreqDepthOct_[ch] = metrics.delayDepthOct * kJitterFrequencyDepthScale;
-			jitterSyncPhaseDepth_[ch] = metrics.delayDepthOct * kJitterSyncPhaseDepthScale;
 		}
 
 		if (! jitterStereo_)
 		{
 			jitterFreqOut_[1] = jitterFreqOut_[0];
 			jitterFreqDepthOct_[1] = jitterFreqDepthOct_[0];
-			jitterSyncPhaseDepth_[1] = jitterSyncPhaseDepth_[0];
 		}
 
 		const float safeCombDelay = juce::jmax (kJitterMinDelaySamples, combDelaySamples);
@@ -951,24 +949,23 @@ private:
 		jitterCombDepthOct_ = combMetrics.delayDepthOct;
 	}
 
-	inline float getJitterFreqMultiplier (int channel) const noexcept
+	inline float getJitteredFrequencyHz (float baseFreq, int channel) const noexcept
 	{
 		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
 		if (! jitterActive_ || amt <= 0.000001f)
-			return 1.0f;
+			return baseFreq;
+
+		const float absBase = std::abs (baseFreq);
+		if (absBase <= kJitterFrequencyBypassHz)
+			return baseFreq;
 
 		const int lane = juce::jlimit (0, 1, channel);
-		return std::exp2 (-jitterFreqOut_[lane] * jitterFreqDepthOct_[lane]);
-	}
+		const float referenceHz = std::sqrt (absBase * absBase + kJitterFrequencyFloorHz * kJitterFrequencyFloorHz);
+		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f);
+		const float sign = (baseFreq < 0.0f) ? -1.0f : 1.0f;
+		const float jitteredAbs = juce::jmax (0.0f, absBase - jitterFreqOut_[lane] * depthHz);
 
-	inline float getJitterSyncPhaseOffset (int channel) const noexcept
-	{
-		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
-		if (! jitterActive_ || amt <= 0.000001f)
-			return 0.0f;
-
-		const int lane = juce::jlimit (0, 1, channel);
-		return jitterFreqOut_[lane] * jitterSyncPhaseDepth_[lane];
+		return juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, sign * jitteredAbs);
 	}
 
 	inline float applyJitterToFeedbackMagnitude (float feedbackMagnitude) const noexcept

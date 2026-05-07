@@ -1498,10 +1498,18 @@ juce::String FREQTRAudioProcessorEditor::getEngineText() const
     const float val = (float) engineSlider.getValue();
     if (val < 0.01f)
         return "AM ENGINE";
+    if (std::abs (val - 0.5f) < 0.01f)
+        return "RM ENGINE";
     if (val > 0.99f)
         return "FREQ SHIFT ENGINE";
-    const int pct = (int) std::lround (val * 100.0);
-    return "AM|FREQ " + juce::String (pct) + "% ENGINE";
+    if (val < 0.5f)
+    {
+        const int pct = (int) std::lround (val * 200.0f);
+        return "AM|RM " + juce::String (pct) + "% ENGINE";
+    }
+
+    const int pct = (int) std::lround ((val - 0.5f) * 200.0f);
+    return "RM|FS " + juce::String (pct) + "% ENGINE";
 }
 
 juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
@@ -1509,10 +1517,18 @@ juce::String FREQTRAudioProcessorEditor::getEngineTextShort() const
     const float val = (float) engineSlider.getValue();
     if (val < 0.01f)
         return "AM";
+    if (std::abs (val - 0.5f) < 0.01f)
+        return "RM";
     if (val > 0.99f)
         return "FREQ SHIFT";
-    const int pct = (int) std::lround (val * 100.0);
-    return "AM|FREQ " + juce::String (pct) + "%";
+    if (val < 0.5f)
+    {
+        const int pct = (int) std::lround (val * 200.0f);
+        return "AM|RM " + juce::String (pct) + "%";
+    }
+
+    const int pct = (int) std::lround ((val - 0.5f) * 200.0f);
+    return "RM|FS " + juce::String (pct) + "%";
 }
 
 juce::String FREQTRAudioProcessorEditor::getStyleText() const
@@ -4969,6 +4985,8 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "100% JITTER",
         "750.00 Hz COMB",
         "FREQ SHIFT ENGINE",
+        "100% AM|RM ENGINE",
+        "100% RM|FS ENGINE",
         "STEREO STYLE", "DUAL STYLE",
         "100% HARM",
         "-1.00 POLARITY",

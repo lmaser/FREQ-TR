@@ -6,17 +6,18 @@
 
 <br/><br/>
 
-FREQ-TR is a frequency shifter and amplitude modulator built for spectral manipulation, inharmonic textures, and creative tonal movement.
-It combines an FIR Hilbert-transform frequency shifter with an AM/ring-mod engine, MIDI note control, tempo-synced rates, feedback, filtering, tilt, limiter stages, and a compact CRT-inspired interface.
+FREQ-TR is a frequency shifter, ring modulator, and amplitude modulator built for spectral manipulation, inharmonic textures, and creative tonal movement.
+It combines an FIR Hilbert-transform frequency shifter with AM and RM engines, MIDI note control, tempo-synced rates, feedback, filtering, tilt, limiter stages, and a compact CRT-inspired interface.
 
 ## Concept
 
 FREQ-TR shifts audio by a fixed amount in hertz, not by ratio. Unlike pitch shifting, frequency shifting moves every partial by the same offset, breaking harmonic relationships and producing metallic, bell-like, or alien timbres.
 
-The ENGINE control blends between pure amplitude modulation (AM) and full frequency shifting:
-- 0% = AM / ring-mod style multiplication
+The ENGINE control blends through three explicit points:
+- 0% = unipolar AM
+- 50% = bipolar ring modulation
 - 100% = single-sideband frequency shift via FIR Hilbert transform
-- in between = continuous blend between both behaviors
+- in between = continuous AM -> RM -> frequency-shift blend
 
 POLARITY changes the sign of the shift frequency and the AM carrier direction, so the plugin can move upward, downward, or collapse to zero effect around the center.
 
@@ -106,16 +107,17 @@ Resonant frequency of the feedback delay line. Higher values shorten the feedbac
 ### JITTER (0-100%)
 
 Internal motion for the frequency shifter and feedback network. It uses the same time-equivalent jitter model as the other TR modulation plugins:
-- `FREQ` is modulated from its oscillator period
+- `FREQ` is modulated from its oscillator period, with an effective Hz floor so low rates still move perceptually
 - `COMB` is modulated as feedback delay time
 - `FEEDBACK` is modulated multiplicatively, without generating feedback from silence
 
-At 0% the jitter path is bypassed. In stereo modes, deterministic lanes keep the movement repeatable while avoiding identical left/right modulation.
+At 0% the jitter path is bypassed. In stereo modes, deterministic lanes keep the movement repeatable while avoiding identical left/right modulation. In SYNC + RETRIG mode, the oscillator integrates the jittered frequency sample-accurately instead of applying a small phase-only offset.
 
 ### ENGINE (0-100%)
 
-Blend between AM and frequency shift:
+Blend between AM, ring modulation, and frequency shift:
 - 0% = AM
+- 50% = RM
 - 100% = FREQ SHIFT
 
 ### STYLE
@@ -241,14 +243,14 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 
 ### DSP Architecture
 
-- Hilbert transform: 128-tap FIR with Blackman windowing
+- Hilbert transform: 511-tap odd-length FIR with Blackman windowing
 - Real path: matched delay for correct single-sideband reconstruction
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
 - Harmonic cap: 24 partials max, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
 - Feedback: comb-tuned delay line with DC blocking and low-pass conditioning
-- Jitter: time-equivalent smooth S&H / flutter / tone modulation applied to frequency, comb delay, and feedback magnitude
+- Jitter: time-equivalent smooth S&H / flutter / tone modulation applied to oscillator frequency, comb delay, and feedback magnitude
 - Safety: final hard safety clip at very high level only
 
 ### MIDI
@@ -281,6 +283,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added TILT EQ
 - Added CHAOS F / CHAOS D
 - Added JITTER for deterministic internal movement of frequency, comb, and feedback
+- Added AM -> RM -> FREQ SHIFT engine mapping
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

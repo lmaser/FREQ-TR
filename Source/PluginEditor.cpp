@@ -6020,7 +6020,7 @@ void FREQTRAudioProcessorEditor::resized()
             const int comboGap = 4;
             const int totalW = horizontalLayout.barW + horizontalLayout.valuePad + horizontalLayout.valueW;
             const int comboW = (totalW - comboGap * 3) / 4;
-            const int comboH = juce::jmax (24, verticalLayout.barH);
+            const int comboH = juce::jlimit (32, 42, verticalLayout.barH + 8);
             modeInCombo.setBounds  (horizontalLayout.leftX,                           modeY, comboW, comboH);
             modeOutCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap),      modeY, comboW, comboH);
             sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGap) * 2,  modeY, comboW, comboH);

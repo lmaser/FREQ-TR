@@ -150,6 +150,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 					 #if ! JucePlugin_IsMidiEffect
 					  #if ! JucePlugin_IsSynth
 					   .withInput  ("Input", juce::AudioChannelSet::stereo(), true)
+					   .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), false)
 					  #endif
 					   .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
 					 #endif
@@ -175,6 +176,8 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	midiParam    = apvts.getRawParameterValue (kParamMidi);
 	alignParam   = apvts.getRawParameterValue (kParamAlign);
 	pdcParam     = apvts.getRawParameterValue (kParamPdc);
+	sidechainParam = apvts.getRawParameterValue (kParamSidechain);
+	sidechainSmoothParam = apvts.getRawParameterValue (kParamSidechainSmooth);
 	filterHpFreqParam  = apvts.getRawParameterValue (kParamFilterHpFreq);
 	filterLpFreqParam  = apvts.getRawParameterValue (kParamFilterLpFreq);
 	filterHpSlopeParam = apvts.getRawParameterValue (kParamFilterHpSlope);
@@ -383,6 +386,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	hilbertBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	cleanDelayBufL.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	cleanDelayBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	sidechainHilbertBufL.assign ((size_t) kHilbertMaxOrder, 0.0f);
+	sidechainHilbertBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 
 	hilbertPos = 0;
@@ -404,6 +409,9 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	smoothedOutputGain = 1.0f;
 	smoothedPan = loadAtomicOrDefault (panParam, kPanDefault);
 	smoothedLimThreshold = fastDecibelsToGain (loadAtomicOrDefault (limThresholdParam, kLimThresholdDefault));
+	sidechainCarrierSmoothL_ = 0.0f;
+	sidechainCarrierSmoothR_ = 0.0f;
+	sidechainGateSmoothed_ = 0.0f;
 	lastMidiNote.store (-1, std::memory_order_relaxed);
 	lastMidiVelocity.store (0, std::memory_order_relaxed);
 	currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
@@ -606,6 +614,8 @@ void FREQTRAudioProcessor::releaseResources()
 {
 	hilbertBufL.clear();
 	hilbertBufR.clear();
+	sidechainHilbertBufL.clear();
+	sidechainHilbertBufR.clear();
 	for (auto& taps : hilbertFoldedTapsByWindow_)
 		taps.clear();
 }
@@ -624,6 +634,15 @@ bool FREQTRAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
    #if ! JucePlugin_IsSynth
 	if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
 		return false;
+
+	if (getBusCount (true) > 1)
+	{
+		const auto sidechainLayout = layouts.getChannelSet (true, 1);
+		if (! sidechainLayout.isDisabled()
+			&& sidechainLayout != juce::AudioChannelSet::mono()
+			&& sidechainLayout != juce::AudioChannelSet::stereo())
+			return false;
+	}
    #endif
 
 	return true;
@@ -656,8 +675,30 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 {
 	juce::ScopedNoDenormals noDenormals;
 
-	const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
+	const int numChannels = juce::jmin (getTotalNumOutputChannels(), 2);
 	const int numSamples  = buffer.getNumSamples();
+
+	const bool sidechainEnabled = loadBoolParamOrDefault (sidechainParam, false);
+	const float* sidechainReadL = nullptr;
+	const float* sidechainReadR = nullptr;
+	int sidechainChannels = 0;
+	float sidechainPeak = 0.0f;
+
+	if (sidechainEnabled && getBusCount (true) > 1)
+	{
+		auto sidechainBuffer = getBusBuffer (buffer, true, 1);
+		sidechainChannels = sidechainBuffer.getNumChannels();
+		if (sidechainChannels > 0)
+		{
+			sidechainReadL = sidechainBuffer.getReadPointer (0);
+			sidechainReadR = (sidechainChannels > 1) ? sidechainBuffer.getReadPointer (1) : sidechainReadL;
+
+			for (int ch = 0; ch < juce::jmin (sidechainChannels, 2); ++ch)
+				sidechainPeak = juce::jmax (sidechainPeak,
+					sidechainBuffer.getMagnitude (ch, 0, numSamples));
+		}
+	}
+	const bool sidechainHasInput = sidechainEnabled && sidechainReadL != nullptr && sidechainPeak > 1.0e-6f;
 
 	// ── MIDI note tracking ──
 	const bool midiEnabled = loadBoolParamOrDefault (midiParam, false);
@@ -707,7 +748,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 	}
 
-	for (int i = numChannels; i < buffer.getNumChannels(); ++i)
+	for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
 		buffer.clear (i, 0, numSamples);
 
 	if (currentSampleRate <= 0.0
@@ -770,6 +811,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
 	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
+	const float sidechainSmoothTarget = juce::jlimit (kSidechainSmoothMin, kSidechainSmoothMax,
+		loadAtomicOrDefault (sidechainSmoothParam, kSidechainSmoothDefault));
+	const float sidechainSmoothTau = sidechainSmoothTarget <= 0.0001f
+		? 0.0f
+		: (0.00005f + sidechainSmoothTarget * sidechainSmoothTarget * 0.012f);
+	const float sidechainSmoothCoeff = sidechainSmoothTau <= 0.0f
+		? 0.0f
+		: std::exp (-1.0f / ((float) currentSampleRate * sidechainSmoothTau));
+	const float sidechainGateTau = 0.003f + sidechainSmoothTarget * 0.012f;
+	const float sidechainGateCoeff = std::exp (-1.0f / ((float) currentSampleRate * sidechainGateTau));
 
 	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
 
@@ -1027,12 +1078,37 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 
 		// Write clean input into Hilbert buffer (no feedback — keeps Hilbert clean)
+		const float sidechainGateTarget = sidechainHasInput ? 1.0f : 0.0f;
+		sidechainGateSmoothed_ = sidechainGateCoeff * sidechainGateSmoothed_
+			+ (1.0f - sidechainGateCoeff) * sidechainGateTarget;
+
+		const float sidechainRawL = sidechainHasInput ? sidechainReadL[n] : 0.0f;
+		const float sidechainRawR = sidechainHasInput ? sidechainReadR[n] : sidechainRawL;
+		if (sidechainSmoothCoeff <= 0.0f)
+		{
+			sidechainCarrierSmoothL_ = sidechainRawL;
+			sidechainCarrierSmoothR_ = sidechainRawR;
+		}
+		else
+		{
+			sidechainCarrierSmoothL_ = sidechainSmoothCoeff * sidechainCarrierSmoothL_
+				+ (1.0f - sidechainSmoothCoeff) * sidechainRawL;
+			sidechainCarrierSmoothR_ = sidechainSmoothCoeff * sidechainCarrierSmoothR_
+				+ (1.0f - sidechainSmoothCoeff) * sidechainRawR;
+		}
+
+		sidechainHilbertBufL[(size_t) hilbertPos] = std::tanh (sidechainCarrierSmoothL_);
+		sidechainHilbertBufR[(size_t) hilbertPos] = std::tanh (sidechainCarrierSmoothR_);
+
 		cleanDelayBufL[(size_t) hilbertPos] = mInL;
 		cleanDelayBufR[(size_t) hilbertPos] = mInR;
 
 		// Feedback: read from Comb-controlled delay line
 		const float fb = applyJitterToFeedbackMagnitude (feedbackSmoothed.getNextValue());
-		const float effectiveFb = (std::abs (jitteredFreqL) < 0.001f) ? 0.0f : fb;
+		const float carrierPresence = sidechainEnabled
+			? sidechainGateSmoothed_
+			: (std::abs (jitteredFreqL) < 0.001f ? 0.0f : 1.0f);
+		const float effectiveFb = (carrierPresence > 0.0001f) ? fb * carrierPresence : 0.0f;
 
 		// Smooth the comb size to avoid clicks
 		const float jitteredTargetComb = applyJitterToCombTarget (targetComb);
@@ -1187,6 +1263,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
 
 			float hilbL = 0.0f, hilbR = 0.0f;
+			float sidechainHilbL = 0.0f, sidechainHilbR = 0.0f;
 			for (const auto& tap : taps)
 			{
 				const int i1 = (hilbertPos - tap.offset + order) & orderMask;
@@ -1195,14 +1272,21 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float diffR = hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2];
 				hilbL += tap.coeff * diffL;
 				hilbR += tap.coeff * diffR;
+				const float scDiffL = sidechainHilbertBufL[(size_t) i1] - sidechainHilbertBufL[(size_t) i2];
+				const float scDiffR = sidechainHilbertBufR[(size_t) i1] - sidechainHilbertBufR[(size_t) i2];
+				sidechainHilbL += tap.coeff * scDiffL;
+				sidechainHilbR += tap.coeff * scDiffR;
 			}
 
 			const int delayIdx = (hilbertPos - half + order) & orderMask;
 			const float realL = hilbertBufL[(size_t) delayIdx];
 			const float realR = hilbertBufR[(size_t) delayIdx];
+			const float sidechainRealL = sidechainHilbertBufL[(size_t) delayIdx];
+			const float sidechainRealR = sidechainHilbertBufR[(size_t) delayIdx];
 
 			float coreL, coreR;
-			if (std::abs (jitteredFreqL) < 0.001f)
+			if ((! sidechainEnabled && std::abs (jitteredFreqL) < 0.001f)
+				|| (sidechainEnabled && sidechainGateSmoothed_ <= 0.0001f))
 			{
 				coreL = realL;
 				coreR = useStereoInput ? realR : realL;
@@ -1214,23 +1298,37 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, carrier);
 				};
 
-				const float carrierL = oscWave;
-				const float carrierR = useStereoInput
-					? (style == 2 ? -oscWave
-					  : (style == 3 ? oscWaveR
-					                : oscWave))
-					: carrierL;
+				const float carrierWaveL = sidechainEnabled ? sidechainRealL : oscWave;
+				const float carrierWaveR = sidechainEnabled
+					? (useStereoInput
+						? (style == 2 ? -sidechainRealL
+						  : (style == 3 ? sidechainRealR
+						                : sidechainRealR))
+						: sidechainRealL)
+					: (useStereoInput
+						? (style == 2 ? -oscWave
+						  : (style == 3 ? oscWaveR
+						                : oscWave))
+						: oscWave);
 
-				const float amL = realL * amEnvelope (carrierL);
-				const float amR = useStereoInput ? (realR * amEnvelope (carrierR)) : amL;
-				const float rmL = realL * carrierL;
-				const float rmR = useStereoInput ? (realR * carrierR) : rmL;
+				const float fsCosL = sidechainEnabled ? sidechainRealL : oscWaveCos;
+				const float fsSinL = sidechainEnabled ? sidechainHilbL : oscWave;
+				const float fsCosR = sidechainEnabled
+					? (style == 3 ? sidechainRealR : sidechainRealL)
+					: (style == 3 ? oscWaveCosR : oscWaveCos);
+				const float fsSinR = sidechainEnabled
+					? (style == 3 ? sidechainHilbR : sidechainHilbL)
+					: (style == 3 ? oscWaveR : oscWave);
 
-				const float fsL = realL * oscWaveCos - hilbL * oscWave;
+				const float amL = realL * amEnvelope (carrierWaveL);
+				const float amR = useStereoInput ? (realR * amEnvelope (carrierWaveR)) : amL;
+				const float rmL = realL * carrierWaveL;
+				const float rmR = useStereoInput ? (realR * carrierWaveR) : rmL;
+
+				const float fsL = realL * fsCosL - hilbL * fsSinL;
 				const float fsR = useStereoInput
-					? (style == 2 ? (realR * oscWaveCos + hilbR * oscWave)
-					  : (style == 3 ? (realR * oscWaveCosR - hilbR * oscWaveR)
-					                : (realR * oscWaveCos - hilbR * oscWave)))
+					? (style == 2 ? (realR * fsCosR + hilbR * fsSinR)
+					  : (realR * fsCosR - hilbR * fsSinR))
 					: fsL;
 
 				const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);
@@ -1245,6 +1343,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					const float t = (enginePos - 0.5f) * 2.0f;
 					coreL = rmL + t * (fsL - rmL);
 					coreR = rmR + t * (fsR - rmR);
+				}
+
+				if (sidechainEnabled)
+				{
+					const float scMix = juce::jlimit (0.0f, 1.0f, sidechainGateSmoothed_);
+					const float dryCoreR = useStereoInput ? realR : realL;
+					coreL = realL + scMix * (coreL - realL);
+					coreR = dryCoreR + scMix * (coreR - dryCoreR);
 				}
 			}
 
@@ -1548,7 +1654,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	// ── Invert Polarity / Stereo (GLOBAL mode: after Limiter GLOBAL, before safety clip) ──
 	{
-		const int nc = buffer.getNumChannels();
+		const int nc = numChannels;
 		if (invPol == 2)
 			for (int ch = 0; ch < nc; ++ch)
 				juce::FloatVectorOperations::multiply (buffer.getWritePointer (ch), -1.0f, numSamples);
@@ -1563,7 +1669,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	// ── Safety limiter: +48 dBFS — only catches runaways ──
 	constexpr float kSafetyLimit = 251.19f;
-	for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+	for (int ch = 0; ch < numChannels; ++ch)
 	{
 		auto* data = buffer.getWritePointer (ch);
 		juce::FloatVectorOperations::clip (data, data, -kSafetyLimit, kSafetyLimit, numSamples);
@@ -1682,6 +1788,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamAlign, "Align", true));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamPdc, "PDC", true));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSidechain, "Sidechain", false));
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamSidechainSmooth, "Sidechain Smooth",
+		juce::NormalisableRange<float> (kSidechainSmoothMin, kSidechainSmoothMax, 0.01f, 1.0f),
+		kSidechainSmoothDefault));
 
 	// Wet filter
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (

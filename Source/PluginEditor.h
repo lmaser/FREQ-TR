@@ -30,6 +30,7 @@ private:
     void openNumericEntryPopupForSlider (juce::Slider& s);
     void openMidiChannelPrompt();
     void openRetrigPrompt();
+    void openSidechainSmoothPrompt();
     void scheduleRetrigTipAutoHide();
     void openFilterPrompt();
     void openChaosConfigPrompt (const char* amtParamId, const char* spdParamId, const juce::String& title);
@@ -245,6 +246,9 @@ private:
     juce::ToggleButton alignButton;
     juce::ToggleButton pdcButton;
 
+    juce::ToggleButton sidechainButton;
+    juce::Label sidechainDisplay;
+
     // Chaos buttons
     juce::ToggleButton chaosFilterButton;
     juce::ToggleButton chaosDelayButton;
@@ -289,6 +293,7 @@ private:
     std::unique_ptr<ButtonAttachment> midiAttachment;
     std::unique_ptr<ButtonAttachment> alignAttachment;
     std::unique_ptr<ButtonAttachment> pdcAttachment;
+    std::unique_ptr<ButtonAttachment> sidechainAttachment;
     std::unique_ptr<ButtonAttachment> chaosFilterAttachment;
     std::unique_ptr<ButtonAttachment> chaosDelayAttachment;
 
@@ -328,6 +333,7 @@ private:
         int chaosRowY = 0;
         int btnRow1Y = 0;
         int btnRow2Y = 0;
+        int btnRow3Y = 0;
         int btnRowGap = 0;
         int availableForSliders = 0;
         int barH = 0;
@@ -445,6 +451,7 @@ private:
 
     void updateCombEnabled();
     void updateWindowEnabled();
+    void updateSidechainDependentControls();
 
     juce::String getEngineText() const;
     juce::String getEngineTextShort() const;
@@ -494,6 +501,7 @@ private:
     juce::Rectangle<int> getMidiLabelArea() const;
     juce::Rectangle<int> getAlignLabelArea() const;
     juce::Rectangle<int> getPdcLabelArea() const;
+    juce::Rectangle<int> getSidechainLabelArea() const;
     juce::Rectangle<int> getInfoIconArea() const;
     void updateInfoIconCache();
     bool refreshLegendTextCache();
@@ -581,9 +589,9 @@ private:
     static constexpr double kDefaultPolarity = (double) FREQTRAudioProcessor::kPolarityDefault;
 
     static constexpr int kMinW = 360;
-    static constexpr int kMinH = 700;
+    static constexpr int kMinH = 740;
     static constexpr int kMaxW = 800;
-    static constexpr int kMaxH = 760;
+    static constexpr int kMaxH = 820;
 
     static constexpr int kLayoutVerticalBiasPx = 10;
 

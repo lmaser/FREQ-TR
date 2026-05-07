@@ -31,6 +31,8 @@ public:
 	static constexpr const char* kParamMidi      = "midi";
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
+	static constexpr const char* kParamSidechain = "sidechain";
+	static constexpr const char* kParamSidechainSmooth = "sidechain_smooth";
 
 	static constexpr const char* kParamFilterHpFreq  = "filter_hp_freq";
 	static constexpr const char* kParamFilterLpFreq  = "filter_lp_freq";
@@ -147,6 +149,10 @@ public:
 	static constexpr float kPolarityMin     = -1.0f;
 	static constexpr float kPolarityMax     =  1.0f;
 	static constexpr float kPolarityDefault =  1.0f;
+
+	static constexpr float kSidechainSmoothMin     = 0.0f;
+	static constexpr float kSidechainSmoothMax     = 1.0f;
+	static constexpr float kSidechainSmoothDefault = 0.25f;
 
 	static constexpr float kMixMin     = 0.0f;
 	static constexpr float kMixMax     = 1.0f;
@@ -300,6 +306,7 @@ private:
 	// At 0 Hz shift the output equals the delayed input exactly.
 	std::vector<float> hilbertBufL, hilbertBufR;       // circular FIR input buffers
 	std::vector<float> cleanDelayBufL, cleanDelayBufR; // feedback-free delay for dry ref
+	std::vector<float> sidechainHilbertBufL, sidechainHilbertBufR;
 	int hilbertPos = 0;                                // write position in circular buffers
 
 	// Folded Hilbert taps: exploit antisymmetry + zero-skip.
@@ -362,6 +369,9 @@ private:
 	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
 	float smoothedPan = kPanDefault;
 	float smoothedLimThreshold = 1.0f;
+	float sidechainCarrierSmoothL_ = 0.0f;
+	float sidechainCarrierSmoothR_ = 0.0f;
+	float sidechainGateSmoothed_ = 0.0f;
 
 	// ── Feedback state ──
 	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;
@@ -440,6 +450,8 @@ private:
 	std::atomic<float>* midiParam    = nullptr;
 	std::atomic<float>* alignParam   = nullptr;
 	std::atomic<float>* pdcParam     = nullptr;
+	std::atomic<float>* sidechainParam = nullptr;
+	std::atomic<float>* sidechainSmoothParam = nullptr;
 	std::atomic<float>* filterHpFreqParam  = nullptr;
 	std::atomic<float>* filterLpFreqParam  = nullptr;
 	std::atomic<float>* filterHpSlopeParam = nullptr;

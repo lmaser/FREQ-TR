@@ -26,7 +26,7 @@ POLARITY changes the sign of the shift frequency and the AM carrier direction, s
 FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visible in one main view, with the I/O section foldable from the top bar.
 
 - Bar sliders: drag horizontally, or right-click for numeric entry where available.
-- Toggle buttons: `SYNC`, `MIDI`, `ALIGN`, `PDC`, `CHAOS F`, `CHAOS D`.
+- Toggle buttons: `SYNC`, `MIDI`, `ALIGN`, `PDC`, `SC`, `CHAOS F`, `CHAOS D`.
 - Collapsible I/O section: click the top triangle bar to switch between the main modulation view and the I/O/filter/routing section.
 - Filter bar: opens the HP/LP prompt.
 - Gear icon: opens the info popup and graphics settings.
@@ -78,6 +78,8 @@ Independent send-style levels used only when `MIX MODE = SEND`.
 Shift/modulation frequency. At 0 Hz the wet result collapses to the aligned input reference.
 
 When MIDI is active, the effective frequency follows the incoming note. When SYNC is active, the effective frequency follows the selected DAW subdivision.
+
+When `SC` is active, the internal oscillator carrier is replaced by the sidechain input, so `FREQ`, `MOD`, `SYNC`, `MIDI`, and `HARM` are disabled in the UI.
 
 ### FREQ SYNC
 
@@ -144,6 +146,18 @@ Controls harmonic density of the modulator.
 - effective count is also limited dynamically by Nyquist
 
 This affects both AM and frequency-shift behavior. At low values the modulation is cleaner and more fundamental-driven; at high values it becomes richer and more spectrally dense.
+
+### SC
+
+Enables sidechain carrier mode. Instead of the internal sine/harmonic oscillator, the plugin uses the optional sidechain audio input as the modulation carrier.
+
+- In AM mode, sidechain drives the unipolar amplitude envelope.
+- In RM mode, sidechain is used as the bipolar multiplier.
+- In FREQ SHIFT mode, sidechain is converted to a quadrature carrier through the same Hilbert window system, preserving sideband behavior.
+
+If the sidechain bus is not connected or contains no incoming audio, `SC` does not fall back to the internal oscillator; the wet path collapses to the aligned clean reference and feedback is suppressed.
+
+Right-click `SC` to set `SC SMOOTH` from `x0.00` to `x1.00`. Default is `x0.25`.
 
 ### POLARITY (-1 to +1)
 
@@ -253,6 +267,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Hilbert transform: selectable 127 / 255 / 511 / 1023 / 2047-tap odd-length FIR with Blackman windowing
 - Real path: matched to the maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
+- Sidechain carrier: optional external audio carrier with smooth control and Hilbert quadrature for frequency-shift operation
 - Harmonic cap: 24 partials max, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
@@ -292,6 +307,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added JITTER for deterministic internal movement of frequency, comb, and feedback
 - Added AM -> RM -> FREQ SHIFT engine mapping
 - Added selectable `WIN` control for frequency-shift Hilbert window length
+- Added optional `SC` sidechain carrier mode with smooth prompt
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

@@ -76,6 +76,11 @@ static juce::String formatRetrigTooltip (bool on)
     return juce::String ("RETRIG: ") + (on ? "ON" : "OFF");
 }
 
+static juce::String formatSidechainSmoothTooltip (float smooth)
+{
+    return "SC SMOOTH: x" + juce::String (juce::jlimit (0.0f, 1.0f, smooth), 2);
+}
+
 // ── Parameter listener IDs ──
 static constexpr std::array<const char*, 4> kUiMirrorParamIds {
     FREQTRAudioProcessor::kParamUiPalette,
@@ -922,11 +927,13 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     midiButton.setButtonText ("");
     alignButton.setButtonText ("");
     pdcButton.setButtonText ("");
+    sidechainButton.setButtonText ("");
 
     addAndMakeVisible (syncButton);
     addAndMakeVisible (midiButton);
     addAndMakeVisible (alignButton);
     addAndMakeVisible (pdcButton);
+    addAndMakeVisible (sidechainButton);
 
     // MIDI channel tooltip overlay
     const int savedChannel = audioProcessor.getMidiChannel();
@@ -950,6 +957,16 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     retrigDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
     retrigDisplay.setOpaque (false);
     addAndMakeVisible (retrigDisplay);
+
+    sidechainDisplay.setText ("", juce::dontSendNotification);
+    sidechainDisplay.setInterceptsMouseClicks (true, false);
+    sidechainDisplay.addMouseListener (this, false);
+    sidechainDisplay.setTooltip (formatSidechainSmoothTooltip (
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainSmooth)->load()));
+    sidechainDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+    sidechainDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+    sidechainDisplay.setOpaque (false);
+    addAndMakeVisible (sidechainDisplay);
 
     auto bindSlider = [&] (std::unique_ptr<SliderAttachment>& attachment,
                            const char* paramId,
@@ -996,6 +1013,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindButton (midiAttachment,  FREQTRAudioProcessor::kParamMidi,  midiButton);
     bindButton (alignAttachment, FREQTRAudioProcessor::kParamAlign, alignButton);
     bindButton (pdcAttachment,   FREQTRAudioProcessor::kParamPdc,   pdcButton);
+    bindButton (sidechainAttachment, FREQTRAudioProcessor::kParamSidechain, sidechainButton);
     bindButton (chaosFilterAttachment, FREQTRAudioProcessor::kParamChaos, chaosFilterButton);
     bindButton (chaosDelayAttachment,  FREQTRAudioProcessor::kParamChaosD, chaosDelayButton);
 
@@ -1012,10 +1030,12 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         audioProcessor.apvts.addParameterListener (paramId, this);
 
     audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamSync, this);
+    audioProcessor.apvts.addParameterListener (FREQTRAudioProcessor::kParamSidechain, this);
 
     // Apply initial SYNC state
     if (syncButton.getToggleState())
         updateFreqSliderForSyncMode();
+    updateSidechainDependentControls();
 
     juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
     juce::MessageManager::callAsync ([safeThis]()
@@ -1050,6 +1070,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
         audioProcessor.apvts.removeParameterListener (paramId, this);
 
     audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamSync, this);
+    audioProcessor.apvts.removeParameterListener (FREQTRAudioProcessor::kParamSidechain, this);
 
     audioProcessor.setUiUseCustomPalette (useCustomPalette);
     audioProcessor.setUiCrtEnabled (crtEnabled);
@@ -1167,11 +1188,11 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
         promptOverlay.toFront (false);
 
     const bool enableControls = ! shouldBeActive;
-    const std::array<juce::Component*, 17> interactiveControls {
+    const std::array<juce::Component*, 18> interactiveControls {
         &inputSlider, &outputSlider, &mixSlider,
         &freqSlider, &modSlider, &feedbackSlider, &jitterSlider, &combSlider, &engineSlider, &windowSlider, &harmSlider,
         &polaritySlider, &styleSlider,
-        &syncButton, &midiButton, &alignButton, &pdcButton
+        &syncButton, &midiButton, &alignButton, &pdcButton, &sidechainButton
     };
     for (auto* control : interactiveControls)
         control->setEnabled (enableControls);
@@ -1180,6 +1201,7 @@ void FREQTRAudioProcessorEditor::setPromptOverlayActive (bool shouldBeActive)
     {
         updateCombEnabled();
         updateWindowEnabled();
+        updateSidechainDependentControls();
     }
 
     if (resizerCorner != nullptr)
@@ -1228,6 +1250,18 @@ void FREQTRAudioProcessorEditor::parameterChanged (const juce::String& parameter
         {
             if (safeThis == nullptr) return;
             safeThis->updateFreqSliderForSyncMode();
+        });
+        return;
+    }
+
+    if (parameterID == FREQTRAudioProcessor::kParamSidechain)
+    {
+        juce::ignoreUnused (newValue);
+        juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+        juce::MessageManager::callAsync ([safeThis]()
+        {
+            if (safeThis == nullptr) return;
+            safeThis->updateSidechainDependentControls();
         });
         return;
     }
@@ -1519,6 +1553,31 @@ void FREQTRAudioProcessorEditor::updateWindowEnabled()
     const bool active = (engineSlider.getValue() > 0.5);
     windowSlider.setAlpha (active ? 1.0f : 0.35f);
     windowSlider.setEnabled (active);
+    repaint();
+}
+
+void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
+{
+    if (promptOverlayActive)
+        return;
+
+    const bool sidechainOn = sidechainButton.getToggleState();
+    const float carrierAlpha = sidechainOn ? 0.35f : 1.0f;
+
+    freqSlider.setAlpha (carrierAlpha);
+    modSlider.setAlpha (carrierAlpha);
+    harmSlider.setAlpha (carrierAlpha);
+    syncButton.setAlpha (carrierAlpha);
+    midiButton.setAlpha (carrierAlpha);
+    retrigDisplay.setAlpha (carrierAlpha);
+    midiChannelDisplay.setAlpha (carrierAlpha);
+
+    freqSlider.setEnabled (! sidechainOn);
+    modSlider.setEnabled (! sidechainOn);
+    harmSlider.setEnabled (! sidechainOn);
+    syncButton.setEnabled (! sidechainOn);
+    midiButton.setEnabled (! sidechainOn);
+
     repaint();
 }
 
@@ -3279,6 +3338,169 @@ void FREQTRAudioProcessorEditor::scheduleRetrigTipAutoHide()
         });
 }
 
+void FREQTRAudioProcessorEditor::openSidechainSmoothPrompt()
+{
+    lnf.setScheme (activeScheme);
+    const auto scheme = activeScheme;
+
+    const float currentSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                              FREQTRAudioProcessor::kSidechainSmoothMax,
+                                              audioProcessor.apvts.getRawParameterValue (
+                                                  FREQTRAudioProcessor::kParamSidechainSmooth)->load());
+
+    auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
+    aw->setLookAndFeel (&lnf);
+    aw->addTextEditor ("smooth", juce::String (currentSmooth, 2), juce::String());
+
+    struct SmoothInputFilter : juce::TextEditor::InputFilter
+    {
+        juce::String filterNewText (juce::TextEditor& editor, const juce::String& newText) override
+        {
+            const bool existingHasDot = editor.getText().containsChar ('.');
+            bool seenDot = false;
+            juce::String result;
+
+            for (auto c : newText)
+            {
+                if (c == '.')
+                {
+                    if (seenDot || existingHasDot)
+                        continue;
+                    seenDot = true;
+                    result += c;
+                }
+                else if (juce::CharacterFunctions::isDigit (c))
+                {
+                    result += c;
+                }
+
+                if (result.length() >= 4)
+                    break;
+            }
+
+            juce::String proposed = editor.getText();
+            const int insertPos = editor.getCaretPosition();
+            proposed = proposed.substring (0, insertPos) + result
+                     + proposed.substring (insertPos + editor.getHighlightedText().length());
+
+            if (proposed.length() > 4 || proposed.getFloatValue() > 1.0f)
+                return {};
+
+            if (proposed.length() > 1 && proposed[0] == '0' && proposed[1] != '.')
+                return {};
+
+            return result;
+        }
+    };
+
+    const auto& f = kBoldFont40();
+    auto* label = new juce::Label ("sc_smooth_label", "SMOOTH");
+    label->setJustificationType (juce::Justification::centredLeft);
+    applyLabelTextColour (*label, scheme.text);
+    label->setBorderSize (juce::BorderSize<int> (0));
+    label->setFont (f);
+    aw->addAndMakeVisible (label);
+
+    auto* unit = new juce::Label ("sc_smooth_unit", "x");
+    unit->setJustificationType (juce::Justification::centredLeft);
+    applyLabelTextColour (*unit, scheme.text);
+    unit->setBorderSize (juce::BorderSize<int> (0));
+    unit->setFont (f);
+    aw->addAndMakeVisible (unit);
+
+    if (auto* te = aw->getTextEditor ("smooth"))
+    {
+        te->setFont (f);
+        te->applyFontToAllText (f);
+        te->setInputFilter (new SmoothInputFilter(), true);
+    }
+
+    auto layoutRow = [aw, label, unit]()
+    {
+        auto* te = aw->getTextEditor ("smooth");
+        if (te == nullptr || label == nullptr || unit == nullptr)
+            return;
+
+        const int buttonsTop = getAlertButtonsTop (*aw);
+        auto er = te->getBounds();
+        er.setHeight ((int) (te->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
+        const int rowY = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - er.getHeight()) / 2);
+
+        const int contentPad = kPromptInlineContentPadPx;
+        const int contentW = aw->getWidth() - contentPad * 2;
+        const int labelW = stringWidth (label->getFont(), label->getText()) + 2;
+        const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
+        const int unitW = stringWidth (unit->getFont(), unit->getText()) + 2;
+        const int spaceW = juce::jmax (2, stringWidth (te->getFont(), " "));
+        const int editorW = juce::jlimit (36, 88, textW + 24);
+        const int visualW = labelW + spaceW + editorW + unitW;
+        const int blockLeft = contentPad + juce::jmax (0, (contentW - visualW) / 2);
+
+        label->setBounds (blockLeft, rowY, labelW, er.getHeight());
+        er.setBounds (blockLeft + labelW + spaceW, rowY, editorW, er.getHeight());
+        te->setBounds (er);
+        unit->setBounds (er.getRight(), rowY, unitW, er.getHeight());
+    };
+
+    if (auto* te = aw->getTextEditor ("smooth"))
+        te->onTextChange = [layoutRow]() { layoutRow(); };
+
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    applyPromptShellSize (*aw);
+    layoutAlertWindowButtons (*aw);
+    preparePromptTextEditor (*aw, "smooth", scheme.bg, scheme.text, scheme.fg, f, false);
+    layoutRow();
+    styleAlertButtons (*aw, lnf);
+
+    juce::Component::SafePointer<FREQTRAudioProcessorEditor> safeThis (this);
+    setPromptOverlayActive (true);
+
+    if (safeThis != nullptr)
+    {
+        fitAlertWindowToEditor (*aw, safeThis.getComponent(), [layoutRow] (juce::AlertWindow& a)
+        {
+            juce::ignoreUnused (a);
+            layoutAlertWindowButtons (a);
+            layoutRow();
+        });
+        embedAlertWindowInOverlay (safeThis.getComponent(), aw);
+    }
+    else
+    {
+        aw->centreAroundComponent (this, aw->getWidth(), aw->getHeight());
+        bringPromptWindowToFront (*aw);
+    }
+
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create (
+            [safeThis, aw, savedSmooth = currentSmooth] (int result) mutable
+        {
+            std::unique_ptr<juce::AlertWindow> killer (aw);
+
+            if (safeThis != nullptr)
+                safeThis->setPromptOverlayActive (false);
+
+            if (safeThis == nullptr)
+                return;
+
+            float newSmooth = savedSmooth;
+            if (result == 1)
+            {
+                if (auto* te = aw->getTextEditor ("smooth"))
+                    newSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                              FREQTRAudioProcessor::kSidechainSmoothMax,
+                                              te->getText().getFloatValue());
+
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainSmooth))
+                    p->setValueNotifyingHost (p->convertTo0to1 (newSmooth));
+            }
+
+            safeThis->sidechainDisplay.setTooltip (formatSidechainSmoothTooltip (newSmooth));
+        }),
+        false);
+}
+
 void FREQTRAudioProcessorEditor::openMidiChannelPrompt()
 {
     lnf.setScheme (activeScheme);
@@ -4705,7 +4927,8 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     }
 
     // SYNC label click → toggle (left), retrig toggle (right)
-    if (syncButton.isVisible() && (getSyncLabelArea().contains (pt) || retrigDisplay.getBounds().contains (pt)))
+    if (syncButton.isVisible() && syncButton.isEnabled()
+        && (getSyncLabelArea().contains (pt) || retrigDisplay.getBounds().contains (pt)))
     {
         if (e.mods.isPopupMenu())
             openRetrigPrompt();
@@ -4715,7 +4938,8 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     }
 
     // MIDI label click → toggle (left), channel prompt (right)
-    if (midiButton.isVisible() && (getMidiLabelArea().contains (pt) || midiChannelDisplay.getBounds().contains (pt)))
+    if (midiButton.isVisible() && midiButton.isEnabled()
+        && (getMidiLabelArea().contains (pt) || midiChannelDisplay.getBounds().contains (pt)))
     {
         if (e.mods.isPopupMenu())
             openMidiChannelPrompt();
@@ -4735,6 +4959,17 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     if (pdcButton.isVisible() && getPdcLabelArea().contains (pt))
     {
         pdcButton.setToggleState (! pdcButton.getToggleState(), juce::sendNotificationSync);
+        return;
+    }
+
+    if (sidechainButton.isVisible()
+        && (getSidechainLabelArea().contains (pt) || sidechainDisplay.getBounds().contains (pt)))
+    {
+        if (e.mods.isPopupMenu())
+            openSidechainSmoothPrompt();
+        else
+            sidechainButton.setToggleState (! sidechainButton.getToggleState(), juce::sendNotificationSync);
+        updateSidechainDependentControls();
         return;
     }
 
@@ -4895,8 +5130,8 @@ FREQTRAudioProcessorEditor::buildVerticalLayout (int editorH, int biasY, bool io
 
     m.box = juce::jlimit (40, kToggleBoxPx, (int) std::round (editorH * 0.085));
     m.btnRowGap = juce::jlimit (4, 14, (int) std::round (editorH * 0.008));
-    // 2 button rows: row1 = ALIGN+PDC, row2 = SYNC+MIDI
-    m.btnRow2Y = editorH - m.bottomMargin - m.box;
+    m.btnRow3Y = editorH - m.bottomMargin - m.box;
+    m.btnRow2Y = m.btnRow3Y - m.btnRowGap - m.box;
     m.btnRow1Y = m.btnRow2Y - m.btnRowGap - m.box;
 
     // When expanded, buttons are hidden — chaos sits at the very bottom row.
@@ -5087,7 +5322,7 @@ juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Poin
 
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
-            return sliders[i];
+            return (sliders[i]->isVisible() && sliders[i]->isEnabled()) ? sliders[i] : nullptr;
 
     return nullptr;
 }
@@ -5112,6 +5347,11 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getAlignLabelArea() const
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getPdcLabelArea() const
 {
     return makeToggleLabelArea (pdcButton, getWidth() - kToggleLegendCollisionPadPx, "PDC", "PD");
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getSidechainLabelArea() const
+{
+    return makeToggleLabelArea (sidechainButton, midiButton.getX() - kToggleLegendCollisionPadPx, "SC", "SC");
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getInfoIconArea() const
@@ -5393,6 +5633,7 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             if (labelW > 0)
             {
                 const auto area = juce::Rectangle<int> (labelX, btn.getY(), labelW, cachedVLayout_.box);
+                g.setColour (scheme.text.withMultipliedAlpha (btn.isEnabled() ? 1.0f : 0.35f));
                 drawIfFitsWithOptionalShrink (g, area, text, baseFontPx, minFontPx);
                 g.setColour (scheme.text);
             }
@@ -5404,6 +5645,7 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             drawToggleLabel (pdcButton,   "PDC",   pdcCR);
             drawToggleLabel (syncButton,  "SYNC",  syncCR);
             drawToggleLabel (midiButton,  "MIDI",  midiCR);
+            drawToggleLabel (sidechainButton, "SC", syncCR);
         }
 
         // Mode In / Mode Out / Sum Bus / Limiter Mode labels above combos
@@ -5576,6 +5818,8 @@ void FREQTRAudioProcessorEditor::resized()
         alignButton.setVisible (false);
         pdcButton.setVisible (false);
         retrigDisplay.setVisible (false);
+        sidechainButton.setVisible (false);
+        sidechainDisplay.setVisible (false);
 
         freqSlider.setBounds (0, 0, 0, 0);
         modSlider.setBounds (0, 0, 0, 0);
@@ -5637,6 +5881,8 @@ void FREQTRAudioProcessorEditor::resized()
         alignButton.setVisible (true);
         pdcButton.setVisible (true);
         retrigDisplay.setVisible (true);
+        sidechainButton.setVisible (true);
+        sidechainDisplay.setVisible (true);
 
         freqSlider.setVisible (true);
         modSlider.setVisible (true);
@@ -5676,6 +5922,7 @@ void FREQTRAudioProcessorEditor::resized()
     pdcButton.setBounds   (rightBlockX, verticalLayout.btnRow1Y, toggleHitW, verticalLayout.box);
     syncButton.setBounds  (leftBlockX,  verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
     midiButton.setBounds  (rightBlockX, verticalLayout.btnRow2Y, toggleHitW, verticalLayout.box);
+    sidechainButton.setBounds (leftBlockX, verticalLayout.btnRow3Y, toggleHitW, verticalLayout.box);
 
     // Retrig tooltip overlay
     {
@@ -5688,6 +5935,9 @@ void FREQTRAudioProcessorEditor::resized()
         const auto midiLabelRect = getMidiLabelArea();
         midiChannelDisplay.setBounds (midiLabelRect);
     }
+
+    sidechainDisplay.setBounds (sidechainButton.getBounds().getUnion (getSidechainLabelArea()));
+    updateSidechainDependentControls();
 
     if (resizerCorner != nullptr)
         resizerCorner->setBounds (W - kResizerCornerPx, H - kResizerCornerPx, kResizerCornerPx, kResizerCornerPx);

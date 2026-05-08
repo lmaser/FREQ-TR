@@ -1024,7 +1024,8 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindSlider (panAttachment,      FREQTRAudioProcessor::kParamPan,     panSlider,     (double) FREQTRAudioProcessor::kPanDefault);
     bindSlider (limThresholdAttachment, FREQTRAudioProcessor::kParamLimThreshold, limThresholdSlider, kDefaultLimThreshold);
 
-    // Disable numeric popup for STYLE and LIM THRESHOLD (slider-only)
+    // Disable numeric popup for discrete/slider-only controls.
+    windowSlider.setAllowNumericPopup (false);
     styleSlider.setAllowNumericPopup (false);
     limThresholdSlider.setAllowNumericPopup (false);
 
@@ -5467,7 +5468,8 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     {
         if (auto* slider = getSliderForValueAreaPoint (pt))
         {
-            openNumericEntryPopupForSlider (*slider);
+            if (slider != &windowSlider)
+                openNumericEntryPopupForSlider (*slider);
             return;
         }
     }
@@ -6221,7 +6223,7 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
 
         if (alignButton.isVisible())
         {
-            drawToggleLabel (alignButton, "ALIGN", alignCR);
+            drawToggleLabel (alignButton, chooseToggleLabel (alignButton, alignCR, "ALIGN", "ALN"), alignCR);
             drawToggleLabel (pdcButton,   "PDC",   pdcCR);
             drawToggleLabel (syncButton,  "SYNC",  syncCR);
             drawToggleLabel (midiButton,  "MIDI",  midiCR);

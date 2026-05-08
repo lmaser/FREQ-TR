@@ -331,6 +331,74 @@ private:
 	int hilbertWindowCrossfadeTotal_ = 0;
 	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
 
+	struct FreqShiftAllpassSection
+	{
+		float x1 = 0.0f, x2 = 0.0f;
+		float y1 = 0.0f, y2 = 0.0f;
+
+		void reset() noexcept
+		{
+			x1 = x2 = 0.0f;
+			y1 = y2 = 0.0f;
+		}
+
+		float process (float x, float coeff) noexcept
+		{
+			const float y = coeff * (x + y2) - x2;
+			x2 = x1;
+			x1 = x;
+			y2 = y1;
+			y1 = y;
+			return y;
+		}
+	};
+
+	struct FreqShiftAllpassHilbertState
+	{
+		std::array<FreqShiftAllpassSection, 4> h1;
+		std::array<FreqShiftAllpassSection, 4> h2;
+		float h1Delay = 0.0f;
+
+		void reset() noexcept
+		{
+			for (auto& s : h1) s.reset();
+			for (auto& s : h2) s.reset();
+			h1Delay = 0.0f;
+		}
+
+		std::pair<float, float> process (float x) noexcept
+		{
+			static constexpr float c1[4] =
+			{
+				0.6923878f * 0.6923878f,
+				0.9360654322959f * 0.9360654322959f,
+				0.9882295226860f * 0.9882295226860f,
+				0.9987488452737f * 0.9987488452737f
+			};
+			static constexpr float c2[4] =
+			{
+				0.4021921162426f * 0.4021921162426f,
+				0.8561710882420f * 0.8561710882420f,
+				0.9722909545651f * 0.9722909545651f,
+				0.9952884791278f * 0.9952884791278f
+			};
+
+			float imag = x;
+			float real = x;
+			for (int i = 0; i < 4; ++i)
+			{
+				imag = h1[(size_t) i].process (imag, c1[i]);
+				real = h2[(size_t) i].process (real, c2[i]);
+			}
+
+			const float delayedImag = h1Delay;
+			h1Delay = imag;
+			return { real, delayedImag };
+		}
+	};
+
+	FreqShiftAllpassHilbertState freqShiftHilbertIir_[2];
+
 	// ── Harmonics normalization / weighting ──
 	static constexpr int kMaxHarmonics = 24;
 	static constexpr int kHarmTableSize = 256;
@@ -712,6 +780,9 @@ private:
 	static constexpr float kJitterFrequencyDepthScale = 2.0f;
 	static constexpr float kJitterFrequencyFloorHz = 60.0f;
 	static constexpr float kJitterFrequencyBypassHz = 0.01f;
+	static constexpr float kJitterFrequencyRateMinDelayMs = 4.0f;
+	static constexpr float kJitterFrequencyRateMaxDelayMs = 500.0f;
+	static constexpr float kJitterFrequencyRateCompression = 0.80f;
 
 	float jitterTargetNorm_              = 0.0f;
 	float jitterAmountSmoothed_          = 0.0f;
@@ -844,16 +915,28 @@ private:
 		float feedbackDepth = 0.0f;
 	};
 
-	inline JitterMetrics makeJitterMetrics (float baseDelaySamples, float amount, float sr, int laneIndex) const noexcept
+	static float compressJitterFrequencyRateDelayMs (float rawDelayMs) noexcept
+	{
+		const float limited = juce::jlimit (kJitterFrequencyRateMinDelayMs,
+			kJitterFrequencyRateMaxDelayMs, rawDelayMs);
+		const float ratio = limited / kJitterFrequencyRateMinDelayMs;
+		return kJitterFrequencyRateMinDelayMs * std::pow (ratio, kJitterFrequencyRateCompression);
+	}
+
+	inline JitterMetrics makeJitterMetrics (float rateDelaySamples, float depthDelaySamples,
+	                                        float amount, float sr, int laneIndex) const noexcept
 	{
 		JitterMetrics m;
 		m.amountMapped = juce::jlimit (0.0f, 1.0f, amount);
 
 		const float safeSr = juce::jmax (1.0f, sr);
 		m.delayMs = juce::jmax (kJitterMinDelayMs,
-			juce::jmax (kJitterMinDelaySamples, baseDelaySamples) * 1000.0f / safeSr);
-		const float delaySeconds = m.delayMs * 0.001f;
-		const float delayHz = 1.0f / delaySeconds;
+			juce::jmax (kJitterMinDelaySamples, rateDelaySamples) * 1000.0f / safeSr);
+		const float rateDelaySeconds = m.delayMs * 0.001f;
+		const float depthDelayMs = juce::jmax (kJitterMinDelayMs,
+			juce::jmax (kJitterMinDelaySamples, depthDelaySamples) * 1000.0f / safeSr);
+		const float depthDelaySeconds = depthDelayMs * 0.001f;
+		const float delayHz = 1.0f / rateDelaySeconds;
 
 		m.shortness = jitterShortness (m.delayMs);
 		m.longness = jitterLongness (m.delayMs);
@@ -889,14 +972,19 @@ private:
 		m.toneWeight = juce::jlimit (0.0f, kJitterToneWeightMax, m.toneWeight);
 
 		const float targetDepthRatio = kJitterDepthRatio * std::pow (m.amountMapped, kJitterDepthPower);
-		const float maxDepthSeconds = delaySeconds * kJitterMaxDepthRatio;
+		const float maxDepthSeconds = depthDelaySeconds * kJitterMaxDepthRatio;
 		const float depthSeconds = juce::jlimit (kJitterMinDepthSeconds, maxDepthSeconds,
-			delaySeconds * targetDepthRatio);
-		m.delayDepthOct = std::log2 ((delaySeconds + depthSeconds) / delaySeconds);
+			depthDelaySeconds * targetDepthRatio);
+		m.delayDepthOct = std::log2 ((depthDelaySeconds + depthSeconds) / depthDelaySeconds);
 
 		m.feedbackDepth = (kJitterFeedbackDepthBase + kJitterFeedbackDepthRange * m.amountMapped) * m.amountMapped
 		                * (1.0f + kJitterFeedbackShortBoost * m.shortness);
 		return m;
+	}
+
+	inline JitterMetrics makeJitterMetrics (float baseDelaySamples, float amount, float sr, int laneIndex) const noexcept
+	{
+		return makeJitterMetrics (baseDelaySamples, baseDelaySamples, amount, sr, laneIndex);
 	}
 
 	inline float calcJitterFrequencyDelaySamples (float freqHz) const noexcept
@@ -989,10 +1077,16 @@ private:
 			juce::jmax (kJitterMinDelaySamples, freqDelaySamplesL),
 			juce::jmax (kJitterMinDelaySamples, freqDelaySamplesR)
 		};
+		const float freqRateDelaySamples[2] =
+		{
+			compressJitterFrequencyRateDelayMs (freqDelaySamples[0] * 1000.0f / sr) * sr * 0.001f,
+			compressJitterFrequencyRateDelayMs (freqDelaySamples[1] * 1000.0f / sr) * sr * 0.001f
+		};
 
 		for (int ch = 0; ch < nCh; ++ch)
 		{
-			const JitterMetrics metrics = makeJitterMetrics (freqDelaySamples[ch], amt, sr, ch);
+			const JitterMetrics metrics = makeJitterMetrics (freqRateDelaySamples[ch], freqDelaySamples[ch],
+			                                                 amt, sr, ch);
 			jitterFreqOut_[ch] = advanceJitterModulator (jitterFreqMod_[ch], metrics, sr, ch);
 			jitterFreqDepthOct_[ch] = metrics.delayDepthOct * kJitterFrequencyDepthScale;
 		}

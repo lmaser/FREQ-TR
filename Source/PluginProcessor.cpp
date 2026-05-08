@@ -403,6 +403,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	previousHilbertWindow_ = activeHilbertWindow_;
 	hilbertWindowCrossfadeRemaining_ = 0;
 	hilbertWindowCrossfadeTotal_ = 0;
+	for (auto& state : freqShiftHilbertIir_)
+		state.reset();
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
 	smoothedFreq = 0.0f;
@@ -1317,6 +1319,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// Write into circular Hilbert input buffer
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
 		hilbertBufR[(size_t) hilbertPos] = fbInR;
+		const auto freqShiftIirL = freqShiftHilbertIir_[0].process (fbInL);
+		const auto freqShiftIirR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
 
 		// Harmonic density and quadrature oscillator pair
 		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqL);
@@ -1440,10 +1444,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float rmL = realL * rmCarrierWaveL;
 				const float rmR = useStereoInput ? (realR * rmCarrierWaveR) : rmL;
 
-				const float fsL = realL * fsCosL - hilbL * fsSinL;
+				const float fsRealL = sidechainEnabled ? realL : freqShiftIirL.first;
+				const float fsImagL = sidechainEnabled ? hilbL : freqShiftIirL.second;
+				const float fsRealR = sidechainEnabled ? realR : freqShiftIirR.first;
+				const float fsImagR = sidechainEnabled ? hilbR : freqShiftIirR.second;
+				const float fsL = fsRealL * fsCosL - fsImagL * fsSinL;
 				const float fsR = useStereoInput
-					? (style == 2 ? (realR * fsCosR + hilbR * fsSinR)
-					  : (realR * fsCosR - hilbR * fsSinR))
+					? (style == 2 ? (fsRealR * fsCosR + fsImagR * fsSinR)
+					  : (fsRealR * fsCosR - fsImagR * fsSinR))
 					: fsL;
 
 				const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);

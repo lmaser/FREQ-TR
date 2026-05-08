@@ -419,14 +419,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainDcPrevInR_ = 0.0f;
 	sidechainDcPrevOutL_ = 0.0f;
 	sidechainDcPrevOutR_ = 0.0f;
-	sidechainToneStateL_ = 0.0f;
-	sidechainToneStateR_ = 0.0f;
-	sidechainToneState2L_ = 0.0f;
-	sidechainToneState2R_ = 0.0f;
-	sidechainToneState3L_ = 0.0f;
-	sidechainToneState3R_ = 0.0f;
-	sidechainToneState4L_ = 0.0f;
-	sidechainToneState4R_ = 0.0f;
+	sidechainToneFilterL_.reset();
+	sidechainToneFilterR_.reset();
 	sidechainRmsEnv_ = 0.0f;
 	sidechainGateSmoothed_ = 0.0f;
 	sidechainDepthSmoothed_ = 0.0f;
@@ -841,8 +835,29 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainAgcTau = 0.020f + sidechainTimeTarget * 0.130f;
 	const float sidechainAgcCoeff = std::exp (-1.0f / ((float) currentSampleRate * sidechainAgcTau));
 	const float sidechainDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * 20.0f / (float) currentSampleRate);
-	const float sidechainTonePoleHz = juce::jmin ((float) currentSampleRate * 0.45f, sidechainToneTarget * 2.30f);
-	const float sidechainToneCoeff = std::exp (-juce::MathConstants<float>::twoPi * sidechainTonePoleHz / (float) currentSampleRate);
+	const float sidechainToneEndFactor = std::pow (
+		std::pow (10.0f, 18.0f / 10.0f) - 1.0f, 1.0f / 6.0f);
+	const float sidechainToneEndHz = juce::jmin (sidechainToneTarget, (float) currentSampleRate * 0.45f);
+	const float sidechainToneCutoffHz = juce::jlimit (20.0f, (float) currentSampleRate * 0.45f,
+		((float) currentSampleRate / juce::MathConstants<float>::pi)
+			* std::atan (std::tan (juce::MathConstants<float>::pi * sidechainToneEndHz
+				/ (float) currentSampleRate) / sidechainToneEndFactor));
+	const float sidechainToneK = std::tan (juce::MathConstants<float>::pi * sidechainToneCutoffHz
+		/ (float) currentSampleRate);
+	const float sidechainToneOneNorm = 1.0f / (1.0f + sidechainToneK);
+	const float sidechainToneOneB0 = sidechainToneK * sidechainToneOneNorm;
+	const float sidechainToneOneB1 = sidechainToneOneB0;
+	const float sidechainToneOneA1 = (sidechainToneK - 1.0f) * sidechainToneOneNorm;
+	const float sidechainToneBiquadQ = 1.0f;
+	const float sidechainToneK2 = sidechainToneK * sidechainToneK;
+	const float sidechainToneBiquadNorm = 1.0f / (1.0f + sidechainToneK / sidechainToneBiquadQ
+		+ sidechainToneK2);
+	const float sidechainToneBqB0 = sidechainToneK2 * sidechainToneBiquadNorm;
+	const float sidechainToneBqB1 = 2.0f * sidechainToneBqB0;
+	const float sidechainToneBqB2 = sidechainToneBqB0;
+	const float sidechainToneBqA1 = 2.0f * (sidechainToneK2 - 1.0f) * sidechainToneBiquadNorm;
+	const float sidechainToneBqA2 = (1.0f - sidechainToneK / sidechainToneBiquadQ + sidechainToneK2)
+		* sidechainToneBiquadNorm;
 
 	setLatencySamples (pdcEnabled ? effectiveMaxDelay : 0);
 
@@ -1048,6 +1063,25 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	double syncPhaseAccumL = syncRetrigPhase;
 	double syncPhaseAccumR = syncRetrigPhase;
 
+	auto processSidechainTone = [&] (float x, SidechainToneFilterState& state) noexcept
+	{
+		const float oneY = sidechainToneOneB0 * x + sidechainToneOneB1 * state.oneX1
+			- sidechainToneOneA1 * state.oneY1;
+		state.oneX1 = x;
+		state.oneY1 = oneY;
+
+		const float y = sidechainToneBqB0 * oneY
+			+ sidechainToneBqB1 * state.biquadX1
+			+ sidechainToneBqB2 * state.biquadX2
+			- sidechainToneBqA1 * state.biquadY1
+			- sidechainToneBqA2 * state.biquadY2;
+		state.biquadX2 = state.biquadX1;
+		state.biquadX1 = oneY;
+		state.biquadY2 = state.biquadY1;
+		state.biquadY1 = y;
+		return y;
+	};
+
 	for (int n = 0; n < numSamples; ++n)
 	{
 		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
@@ -1113,26 +1147,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		sidechainDcPrevOutL_ = sidechainDcL;
 		sidechainDcPrevOutR_ = sidechainDcR;
 
-		float sidechainToneL = sidechainDcL;
-		float sidechainToneR = sidechainDcR;
-		sidechainToneStateL_ = sidechainToneCoeff * sidechainToneStateL_
-			+ (1.0f - sidechainToneCoeff) * sidechainDcL;
-		sidechainToneStateR_ = sidechainToneCoeff * sidechainToneStateR_
-			+ (1.0f - sidechainToneCoeff) * sidechainDcR;
-		sidechainToneState2L_ = sidechainToneCoeff * sidechainToneState2L_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneStateL_;
-		sidechainToneState2R_ = sidechainToneCoeff * sidechainToneState2R_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneStateR_;
-		sidechainToneState3L_ = sidechainToneCoeff * sidechainToneState3L_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneState2L_;
-		sidechainToneState3R_ = sidechainToneCoeff * sidechainToneState3R_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneState2R_;
-		sidechainToneState4L_ = sidechainToneCoeff * sidechainToneState4L_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneState3L_;
-		sidechainToneState4R_ = sidechainToneCoeff * sidechainToneState4R_
-			+ (1.0f - sidechainToneCoeff) * sidechainToneState3R_;
-		sidechainToneL = sidechainToneState4L_;
-		sidechainToneR = sidechainToneState4R_;
+		const float sidechainToneL = processSidechainTone (sidechainDcL, sidechainToneFilterL_);
+		const float sidechainToneR = processSidechainTone (sidechainDcR, sidechainToneFilterR_);
 
 		const float sidechainEnergy = 0.5f * (sidechainToneL * sidechainToneL
 			+ sidechainToneR * sidechainToneR);

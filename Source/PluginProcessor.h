@@ -385,14 +385,24 @@ private:
 	float sidechainDcPrevInR_ = 0.0f;
 	float sidechainDcPrevOutL_ = 0.0f;
 	float sidechainDcPrevOutR_ = 0.0f;
-	float sidechainToneStateL_ = 0.0f;
-	float sidechainToneStateR_ = 0.0f;
-	float sidechainToneState2L_ = 0.0f;
-	float sidechainToneState2R_ = 0.0f;
-	float sidechainToneState3L_ = 0.0f;
-	float sidechainToneState3R_ = 0.0f;
-	float sidechainToneState4L_ = 0.0f;
-	float sidechainToneState4R_ = 0.0f;
+	struct SidechainToneFilterState
+	{
+		float oneX1 = 0.0f;
+		float oneY1 = 0.0f;
+		float biquadX1 = 0.0f;
+		float biquadX2 = 0.0f;
+		float biquadY1 = 0.0f;
+		float biquadY2 = 0.0f;
+
+		void reset() noexcept
+		{
+			oneX1 = oneY1 = 0.0f;
+			biquadX1 = biquadX2 = 0.0f;
+			biquadY1 = biquadY2 = 0.0f;
+		}
+	};
+	SidechainToneFilterState sidechainToneFilterL_;
+	SidechainToneFilterState sidechainToneFilterR_;
 	float sidechainRmsEnv_ = 0.0f;
 	float sidechainGateSmoothed_ = 0.0f;
 	float sidechainDepthSmoothed_ = 0.0f;

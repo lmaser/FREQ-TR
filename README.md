@@ -159,9 +159,9 @@ If the sidechain bus is not connected or contains no incoming audio, `SIDECHAIN`
 
 Right-click `SIDECHAIN` to open its carrier prompt:
 - `TIME` ranges from `x0.00` to `x1.00`; default is `x0.25`. It controls sidechain entry/exit smoothing and the partial carrier gain normalization response.
-- `TONE` ranges from `250 Hz` to `20000 Hz`; default is neutral at `20000 Hz`. It limits the carrier bandwidth before AM/RM/frequency-shift processing.
+- `TONE` ranges from `250 Hz` to `5000 Hz`; default is `5000 Hz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
-The sidechain carrier path includes DC blocking, optional tone filtering, and partial automatic gain stabilization before Hilbert quadrature.
+The sidechain carrier path includes DC blocking, Butterworth tone conditioning, and partial automatic gain stabilization before Hilbert quadrature.
 
 ### POLARITY (-1 to +1)
 

@@ -401,10 +401,11 @@ private:
 
 	// ── Harmonics normalization / weighting ──
 	static constexpr int kMaxHarmonics = 24;
-	static constexpr int kHarmTableSize = 256;
 	static constexpr float kHarmWeightExponent = 1.2f;
-	std::array<float, kHarmTableSize + 1> harmGainTable {};
+	static constexpr float kHarmDensityPower = 0.75f;
+	static constexpr float kHarmBlendPower = 0.80f;
 	std::array<float, kMaxHarmonics> harmonicWeights_ {};
+	std::array<float, kMaxHarmonics + 1> harmonicWeightSquarePrefix_ {};
 	void buildHarmTables();
 
 	// ── Oscillator state ──
@@ -433,9 +434,10 @@ private:
 		float cosine = 0.0f;
 	};
 
+	static float getHarmonicBlend (float harmNorm) noexcept;
 	float getEffectiveHarmonicCount (float harmNorm, float fundamentalHz) const noexcept;
-	float getHarmGainForCount (float harmonicCount) const noexcept;
-	HarmonicOscPair fastHarmonicOscPair (float phase, float harmonicCount) const noexcept;
+	float getHarmGainForProfile (float harmonicBlend, float harmonicCount) const noexcept;
+	HarmonicOscPair fastHarmonicOscPair (float phase, float harmonicCount, float harmonicBlend) const noexcept;
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM->RM->FreqShift blend
@@ -779,7 +781,7 @@ private:
 	static constexpr float kJitterFeedbackOutputLimit = 1.0f;
 	static constexpr float kJitterFrequencyDepthScale = 2.0f;
 	static constexpr float kJitterFrequencyFloorHz = 60.0f;
-	static constexpr float kJitterFrequencyBypassHz = 0.01f;
+	static constexpr float kJitterLowFrequencyDepthHz = 10.0f;
 	static constexpr float kJitterFrequencyRateMinDelayMs = 4.0f;
 	static constexpr float kJitterFrequencyRateMaxDelayMs = 500.0f;
 	static constexpr float kJitterFrequencyRateCompression = 0.80f;
@@ -1131,16 +1133,17 @@ private:
 			return baseFreq;
 
 		const float absBase = std::abs (baseFreq);
-		if (absBase <= kJitterFrequencyBypassHz)
+		const float lowFrequencyDepth = smoothStep01 (absBase / kJitterLowFrequencyDepthHz);
+		if (lowFrequencyDepth <= 0.0f)
 			return baseFreq;
 
 		const int lane = juce::jlimit (0, 1, channel);
 		const float referenceHz = std::sqrt (absBase * absBase + kJitterFrequencyFloorHz * kJitterFrequencyFloorHz);
-		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f);
+		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f) * lowFrequencyDepth;
 		const float sign = (baseFreq < 0.0f) ? -1.0f : 1.0f;
-		const float jitteredAbs = juce::jmax (0.0f, absBase - jitterFreqOut_[lane] * depthHz);
+		const float jittered = baseFreq - sign * jitterFreqOut_[lane] * depthHz;
 
-		return juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, sign * jitteredAbs);
+		return juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, jittered);
 	}
 
 	inline float applyJitterToFeedbackMagnitude (float feedbackMagnitude) const noexcept

@@ -231,39 +231,28 @@ void FREQTRAudioProcessor::buildSineLut() noexcept
 
 void FREQTRAudioProcessor::buildHarmTables()
 {
-	constexpr float kTargetRms = 0.70710678118f; // sine RMS
+	float weightSquareSum = 0.0f;
+	harmonicWeightSquarePrefix_[0] = 0.0f;
 
 	for (int i = 0; i < kMaxHarmonics; ++i)
-		harmonicWeights_[(size_t) i] = 1.0f / std::pow ((float) (i + 1), kHarmWeightExponent);
-
-	for (int i = 0; i <= kHarmTableSize; ++i)
 	{
-		const float normCount = (float) i / (float) kHarmTableSize;
-		const float harmonicCount = 1.0f + normCount * (float) (kMaxHarmonics - 1);
-		const int wholeCount = juce::jlimit (1, kMaxHarmonics, (int) std::floor (harmonicCount));
-		const float frac = harmonicCount - (float) wholeCount;
-
-		float sumSq = 0.0f;
-		for (int h = 0; h < wholeCount; ++h)
-		{
-			const float weight = harmonicWeights_[(size_t) h];
-			sumSq += weight * weight;
-		}
-
-		if (wholeCount < kMaxHarmonics && frac > 0.0f)
-		{
-			const float nextWeight = harmonicWeights_[(size_t) wholeCount] * frac;
-			sumSq += nextWeight * nextWeight;
-		}
-
-		const float rms = std::sqrt (0.5f * sumSq);
-		harmGainTable[(size_t) i] = (rms > 0.0001f) ? (kTargetRms / rms) : 1.0f;
+		harmonicWeights_[(size_t) i] = 1.0f / std::pow ((float) (i + 1), kHarmWeightExponent);
+		weightSquareSum += harmonicWeights_[(size_t) i] * harmonicWeights_[(size_t) i];
+		harmonicWeightSquarePrefix_[(size_t) (i + 1)] = weightSquareSum;
 	}
+}
+
+float FREQTRAudioProcessor::getHarmonicBlend (float harmNorm) noexcept
+{
+	const float clamped = juce::jlimit (0.0f, 1.0f, harmNorm);
+	return clamped <= 0.0f ? 0.0f : std::pow (clamped, kHarmBlendPower);
 }
 
 float FREQTRAudioProcessor::getEffectiveHarmonicCount (float harmNorm, float fundamentalHz) const noexcept
 {
-	const float requestedCount = 1.0f + juce::jlimit (0.0f, 1.0f, harmNorm) * (float) (kMaxHarmonics - 1);
+	const float clampedHarm = juce::jlimit (0.0f, 1.0f, harmNorm);
+	const float density = clampedHarm <= 0.0f ? 0.0f : std::pow (clampedHarm, kHarmDensityPower);
+	const float requestedCount = 1.0f + density * (float) (kMaxHarmonics - 1);
 	const float absFundamentalHz = std::abs (fundamentalHz);
 
 	if (absFundamentalHz <= 0.001f || currentSampleRate <= 0.0)
@@ -276,28 +265,48 @@ float FREQTRAudioProcessor::getEffectiveHarmonicCount (float harmNorm, float fun
 	return juce::jlimit (1.0f, (float) nyquistLimitedCount, requestedCount);
 }
 
-float FREQTRAudioProcessor::getHarmGainForCount (float harmonicCount) const noexcept
+float FREQTRAudioProcessor::getHarmGainForProfile (float harmonicBlend, float harmonicCount) const noexcept
 {
+	constexpr float kTargetRms = 0.70710678118f; // sine RMS
 	const float clampedCount = juce::jlimit (1.0f, (float) kMaxHarmonics, harmonicCount);
-	const float tablePos = (clampedCount - 1.0f) / (float) (kMaxHarmonics - 1) * (float) kHarmTableSize;
-	const int i0 = juce::jlimit (0, kHarmTableSize - 1, (int) tablePos);
-	const int i1 = juce::jmin (i0 + 1, kHarmTableSize);
-	const float frac = tablePos - (float) i0;
-	return harmGainTable[(size_t) i0] + frac * (harmGainTable[(size_t) i1] - harmGainTable[(size_t) i0]);
+	const int wholeCount = juce::jlimit (1, kMaxHarmonics, (int) std::floor (clampedCount));
+	const float frac = clampedCount - (float) wholeCount;
+	const float blend = juce::jlimit (0.0f, 1.0f, harmonicBlend);
+
+	float tailSumSq = 0.0f;
+	if (wholeCount > 1)
+		tailSumSq += harmonicWeightSquarePrefix_[(size_t) wholeCount] - harmonicWeightSquarePrefix_[1];
+
+	if (wholeCount < kMaxHarmonics && frac > 0.0f)
+	{
+		const float nextWeight = harmonicWeights_[(size_t) wholeCount] * frac;
+		tailSumSq += nextWeight * nextWeight;
+	}
+
+	const float sumSq = 1.0f + blend * blend * tailSumSq;
+	const float rms = std::sqrt (0.5f * sumSq);
+	return (rms > 0.0001f) ? (kTargetRms / rms) : 1.0f;
 }
 
-FREQTRAudioProcessor::HarmonicOscPair FREQTRAudioProcessor::fastHarmonicOscPair (float phase, float harmonicCount) const noexcept
+FREQTRAudioProcessor::HarmonicOscPair FREQTRAudioProcessor::fastHarmonicOscPair (float phase, float harmonicCount, float harmonicBlend) const noexcept
 {
 	HarmonicOscPair pair;
 
 	const float clampedCount = juce::jlimit (1.0f, (float) kMaxHarmonics, harmonicCount);
 	const int wholeCount = juce::jlimit (1, kMaxHarmonics, (int) std::floor (clampedCount));
 	const float frac = clampedCount - (float) wholeCount;
+	const float blend = juce::jlimit (0.0f, 1.0f, harmonicBlend);
 
-	for (int h = 0; h < wholeCount; ++h)
+	pair.sine = fastSin (phase);
+	pair.cosine = fastCos (phase);
+
+	if (blend <= 0.0f)
+		return pair;
+
+	for (int h = 1; h < wholeCount; ++h)
 	{
 		const float harmonicPhase = phase * (float) (h + 1);
-		const float weight = harmonicWeights_[(size_t) h];
+		const float weight = harmonicWeights_[(size_t) h] * blend;
 		pair.sine += weight * fastSin (harmonicPhase);
 		pair.cosine += weight * fastCos (harmonicPhase);
 	}
@@ -305,7 +314,7 @@ FREQTRAudioProcessor::HarmonicOscPair FREQTRAudioProcessor::fastHarmonicOscPair 
 	if (wholeCount < kMaxHarmonics && frac > 0.0f)
 	{
 		const float harmonicPhase = phase * (float) (wholeCount + 1);
-		const float weight = harmonicWeights_[(size_t) wholeCount] * frac;
+		const float weight = harmonicWeights_[(size_t) wholeCount] * frac * blend;
 		pair.sine += weight * fastSin (harmonicPhase);
 		pair.cosine += weight * fastCos (harmonicPhase);
 	}
@@ -1191,7 +1200,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float sidechainPolaritySign = sidechainPolarity < 0.0f ? -1.0f : 1.0f;
 		const float carrierPresence = sidechainEnabled
 			? sidechainGateSmoothed_ * sidechainPolarityAbs
-			: (std::abs (jitteredFreqL) < 0.001f ? 0.0f : 1.0f);
+			: 1.0f;
 		const float effectiveFb = (carrierPresence > 0.0001f) ? fb * carrierPresence : 0.0f;
 
 		// Smooth the comb size to avoid clicks
@@ -1323,12 +1332,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const auto freqShiftIirR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
 
 		// Harmonic density and quadrature oscillator pair
+		const float harmonicBlend = getHarmonicBlend (smoothedHarm);
 		const float harmonicCountL = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqL);
 		const float harmonicCountR = getEffectiveHarmonicCount (smoothedHarm, jitteredFreqR);
-		const float harmGainL = getHarmGainForCount (harmonicCountL);
-		const float harmGainR = getHarmGainForCount (harmonicCountR);
-		const auto harmPairL = fastHarmonicOscPair ((float) oscPhase, harmonicCountL);
-		const auto harmPairR = fastHarmonicOscPair ((float) oscPhaseR, harmonicCountR);
+		const float harmGainL = getHarmGainForProfile (harmonicBlend, harmonicCountL);
+		const float harmGainR = getHarmGainForProfile (harmonicBlend, harmonicCountR);
+		const auto harmPairL = fastHarmonicOscPair ((float) oscPhase, harmonicCountL, harmonicBlend);
+		const auto harmPairR = fastHarmonicOscPair ((float) oscPhaseR, harmonicCountR, harmonicBlend);
 
 		// Harmonic oscillator pair (RMS-normalized, LUT-accelerated)
 		const float oscWave     = harmPairL.sine   * harmGainL;
@@ -1371,8 +1381,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float sidechainRealR = sidechainHilbertBufR[(size_t) delayIdx];
 
 			float coreL, coreR;
-			if ((! sidechainEnabled && std::abs (jitteredFreqL) < 0.001f)
-				|| (sidechainEnabled && (sidechainGateSmoothed_ <= 0.0001f || sidechainPolarityAbs <= 0.0001f)))
+			if (sidechainEnabled && (sidechainGateSmoothed_ <= 0.0001f || sidechainPolarityAbs <= 0.0001f))
 			{
 				coreL = realL;
 				coreR = useStereoInput ? realR : realL;

@@ -403,6 +403,8 @@ private:
 	};
 	SidechainToneFilterState sidechainToneFilterL_;
 	SidechainToneFilterState sidechainToneFilterR_;
+	float sidechainCarrierSmoothL_ = 0.0f;
+	float sidechainCarrierSmoothR_ = 0.0f;
 	float sidechainRmsEnv_ = 0.0f;
 	float sidechainGateSmoothed_ = 0.0f;
 	float sidechainDepthSmoothed_ = 0.0f;

@@ -153,7 +153,7 @@ public:
 
 	static constexpr float kHarmMin     = 0.0f;
 	static constexpr float kHarmMax     = 1.0f;
-	static constexpr float kHarmDefault = 0.0f;    // 0 = sine only, 1 = up to 24 harmonics
+	static constexpr float kHarmDefault = 0.0f;    // 0 = sine only, 1 = FREAK-like harmonic stack
 
 	static constexpr float kPolarityMin     = -1.0f;
 	static constexpr float kPolarityMax     =  1.0f;
@@ -400,12 +400,17 @@ private:
 	FreqShiftAllpassHilbertState freqShiftHilbertIir_[2];
 
 	// ── Harmonics normalization / weighting ──
-	static constexpr int kMaxHarmonics = 24;
-	static constexpr float kHarmWeightExponent = 1.2f;
-	static constexpr float kHarmDensityPower = 0.75f;
-	static constexpr float kHarmBlendPower = 0.80f;
-	std::array<float, kMaxHarmonics> harmonicWeights_ {};
-	std::array<float, kMaxHarmonics + 1> harmonicWeightSquarePrefix_ {};
+	static constexpr int kMaxHarmonics = 16;
+	static constexpr float kHarmAmountPower = 0.90f;
+	static constexpr float kHarmSlopePower = 0.70f;
+	static constexpr float kHarmSlopeMin = 2.15f;
+	static constexpr float kHarmSlopeMax = 4.60f;
+	static constexpr float kHarmGateLastStart = 0.72f;
+	static constexpr float kHarmGateWidth = 0.22f;
+	static constexpr float kHarmTailRolloffDb = 38.0f;
+	static constexpr float kHarmTailRolloffPower = 2.0f;
+	static constexpr int kHarmProfileTableSize = 512;
+	std::array<std::array<float, kMaxHarmonics>, kHarmProfileTableSize + 1> harmonicProfileTable_ {};
 	void buildHarmTables();
 
 	// ── Oscillator state ──
@@ -434,10 +439,7 @@ private:
 		float cosine = 0.0f;
 	};
 
-	static float getHarmonicBlend (float harmNorm) noexcept;
-	float getEffectiveHarmonicCount (float harmNorm, float fundamentalHz) const noexcept;
-	float getHarmGainForProfile (float harmonicBlend, float harmonicCount) const noexcept;
-	HarmonicOscPair fastHarmonicOscPair (float phase, float harmonicCount, float harmonicBlend) const noexcept;
+	HarmonicOscPair fastHarmonicOscPair (float phase, float harmNorm, float fundamentalHz) const noexcept;
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM->RM->FreqShift blend

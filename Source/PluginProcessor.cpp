@@ -44,13 +44,21 @@ namespace
 			FREQTRAudioProcessor::kCombMax,
 			[] (float rangeStart, float rangeEnd, float normalised) noexcept
 			{
-				const float minHz = juce::jmax (0.000001f, rangeStart);
+				juce::ignoreUnused (rangeStart);
+				if (normalised <= 0.0f)
+					return FREQTRAudioProcessor::kCombMin;
+
+				const float minHz = FREQTRAudioProcessor::kCombEffectiveMin;
 				const float maxHz = juce::jmax (minHz, rangeEnd);
 				return minHz * std::pow (maxHz / minHz, juce::jlimit (0.0f, 1.0f, normalised));
 			},
 			[] (float rangeStart, float rangeEnd, float value) noexcept
 			{
-				const float minHz = juce::jmax (0.000001f, rangeStart);
+				juce::ignoreUnused (rangeStart);
+				if (value <= FREQTRAudioProcessor::kCombEffectiveMin)
+					return 0.0f;
+
+				const float minHz = FREQTRAudioProcessor::kCombEffectiveMin;
 				const float maxHz = juce::jmax (minHz, rangeEnd);
 				const float clamped = juce::jlimit (minHz, maxHz, value);
 				return std::log (clamped / minHz) / std::log (maxHz / minHz);
@@ -437,12 +445,13 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
 	feedbackLastL = 0.0f;
 	feedbackLastR = 0.0f;
-	fbkDelaySize = juce::jmax (2, (int) std::ceil (currentSampleRate / (double) kCombMin) + 2);
+	fbkDelaySize = juce::jmax (2, (int) std::ceil (currentSampleRate / (double) kCombEffectiveMin) + 2);
 	fbkDelayBufL.assign ((size_t) fbkDelaySize, 0.0f);
 	fbkDelayBufR.assign ((size_t) fbkDelaySize, 0.0f);
 	fbkDelayWritePos = 0;
 	{
-		const float initCombHz = juce::jlimit (kCombMin, kCombMax, loadAtomicOrDefault (combParam, kCombDefault));
+		const float initCombHz = juce::jlimit (kCombEffectiveMin, kCombMax,
+			loadAtomicOrDefault (combParam, kCombDefault));
 		smoothedComb_ = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) initCombHz));
 	}
 
@@ -782,7 +791,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float modVal = loadAtomicOrDefault (modParam, kModDefault);
 	const float rawFeedback = juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
 	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
-	const float combHz = juce::jlimit (kCombMin, kCombMax,
+	const float combHz = juce::jlimit (kCombEffectiveMin, kCombMax,
 		loadAtomicOrDefault (combParam, kCombDefault));
 	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz));
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);

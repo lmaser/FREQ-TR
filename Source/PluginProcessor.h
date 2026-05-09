@@ -105,13 +105,14 @@ public:
 	static constexpr float kJitterMax     = 1.0f;
 	static constexpr float kJitterDefault = 0.0f;
 
-	static constexpr float kCombMin     = 0.1f;
+	static constexpr float kCombMin     = 0.0f;
+	static constexpr float kCombEffectiveMin = 0.1f;
 	static constexpr float kCombMax     = 5000.0f;
 	static constexpr float kCombDefault = 5.0f;
 
 	static constexpr int kHilbertWindowMin = 128;
 	static constexpr int kHilbertWindowMax = 2048;
-	static constexpr int kHilbertWindowDefault = 2048;
+	static constexpr int kHilbertWindowDefault = 512;
 	static constexpr int kHilbertMaxWindowDefault = 2048;
 	static constexpr int kNumHilbertWindows = 5;
 	static constexpr int kHilbertWindows[kNumHilbertWindows] = { 128, 256, 512, 1024, 2048 };

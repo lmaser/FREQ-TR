@@ -73,7 +73,16 @@ static juce::String formatMidiChannelTooltip (int ch)
 // ── Retrig tooltip ──
 static juce::String formatRetrigTooltip (bool on)
 {
-    return juce::String ("RETRIG: ") + (on ? "ON" : "OFF");
+    return juce::String ("RETRIG ") + (on ? "ON" : "OFF");
+}
+
+static juce::String formatChaosTooltip (float amountPercent, float speedHz)
+{
+    return "AMT " + juce::String (juce::roundToInt (juce::jlimit (0.0f, 100.0f, amountPercent))) + "%"
+         + " | SPD " + juce::String (juce::jlimit (FREQTRAudioProcessor::kChaosSpdMin,
+                                                   FREQTRAudioProcessor::kChaosSpdMax,
+                                                   speedHz), 1)
+         + " Hz";
 }
 
 static juce::String formatPdcTooltip (bool on, int maxWindow)
@@ -849,7 +858,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         chaosFilterDisplay.setText ("", juce::dontSendNotification);
         chaosFilterDisplay.setInterceptsMouseClicks (true, false);
         chaosFilterDisplay.addMouseListener (this, false);
-        chaosFilterDisplay.setTooltip (juce::String (juce::roundToInt (savedAmt)) + "% | " + juce::String (savedSpd, 1) + " Hz");
+        chaosFilterDisplay.setTooltip (formatChaosTooltip (savedAmt, savedSpd));
         chaosFilterDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         chaosFilterDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
         chaosFilterDisplay.setOpaque (false);
@@ -865,7 +874,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         chaosDelayDisplay.setText ("", juce::dontSendNotification);
         chaosDelayDisplay.setInterceptsMouseClicks (true, false);
         chaosDelayDisplay.addMouseListener (this, false);
-        chaosDelayDisplay.setTooltip (juce::String (juce::roundToInt (savedAmt)) + "% | " + juce::String (savedSpd, 1) + " Hz");
+        chaosDelayDisplay.setTooltip (formatChaosTooltip (savedAmt, savedSpd));
         chaosDelayDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         chaosDelayDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
         chaosDelayDisplay.setOpaque (false);
@@ -1027,9 +1036,8 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     // Disable numeric popup for discrete/slider-only controls.
     windowSlider.setAllowNumericPopup (false);
     styleSlider.setAllowNumericPopup (false);
-    limThresholdSlider.setAllowNumericPopup (false);
 
-    // Dim Comb slider when Feedback is zero
+    // Keep Comb editable even when Feedback is zero; it is part of the feedback tone setup.
     updateCombEnabled();
     updateWindowEnabled();
 
@@ -1610,9 +1618,8 @@ juce::String FREQTRAudioProcessorEditor::getCombTextShort() const
 
 void FREQTRAudioProcessorEditor::updateCombEnabled()
 {
-    const bool active = (feedbackSlider.getValue() > 0.001);
-    combSlider.setAlpha (active ? 1.0f : 0.35f);
-    combSlider.setEnabled (active);
+    combSlider.setAlpha (1.0f);
+    combSlider.setEnabled (true);
     repaint();
 }
 
@@ -1791,12 +1798,12 @@ juce::String FREQTRAudioProcessorEditor::getPolarityTextShort() const
 {
     const float val = (float) polaritySlider.getValue();
     if (val <= -0.995f)
-        return "-1";
+        return "-1 POL";
     if (val >= 0.995f)
-        return "+1";
+        return "+1 POL";
     if (std::abs (val) < 0.005f)
-        return "0";
-    return juce::String (val, 2);
+        return "0 POL";
+    return juce::String (val, 2) + " POL";
 }
 
 juce::String FREQTRAudioProcessorEditor::getMixText() const
@@ -2511,6 +2518,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " %"; }
     else if (&s == &inputSlider)     { suffix = " DB INPUT";   suffixShort = " DB IN"; }
     else if (&s == &outputSlider)    { suffix = " DB OUTPUT";  suffixShort = " DB OUT"; }
+    else if (&s == &tiltSlider)      { suffix = " DB TILT";    suffixShort = " DB TILT"; }
+    else if (&s == &limThresholdSlider) { suffix = " DB LIM";  suffixShort = " DB LIM"; }
     const juce::String suffixText = suffix.trimStart();
     const juce::String suffixTextShort = suffixShort.trimStart();
     const bool isPercentPrompt = (&s == &engineSlider || &s == &harmSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &jitterSlider || &s == &panSlider);
@@ -2610,6 +2619,10 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             worstCaseText = "-144.0";
         else if (&s == &outputSlider)
             worstCaseText = "-144.0";
+        else if (&s == &tiltSlider)
+            worstCaseText = "-6.0";
+        else if (&s == &limThresholdSlider)
+            worstCaseText = "-36.0";
         else
             worstCaseText = "999.99";
 
@@ -2778,6 +2791,20 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             maxVal = FREQTRAudioProcessor::kGainMaxDb;
             maxDecs = 1;
             maxLen = 6;
+        }
+        else if (&s == &tiltSlider)
+        {
+            minVal = FREQTRAudioProcessor::kTiltMin;
+            maxVal = FREQTRAudioProcessor::kTiltMax;
+            maxDecs = 1;
+            maxLen = 4;
+        }
+        else if (&s == &limThresholdSlider)
+        {
+            minVal = FREQTRAudioProcessor::kLimThresholdMin;
+            maxVal = FREQTRAudioProcessor::kLimThresholdMax;
+            maxDecs = 1;
+            maxLen = 5;
         }
         else if (&s == &panSlider)
         {
@@ -3625,7 +3652,7 @@ void FREQTRAudioProcessorEditor::openPdcMaxWindowPrompt()
                 return;
 
             *syncing = true;
-            int window = FREQTRAudioProcessor::kHilbertWindowDefault;
+            int window = FREQTRAudioProcessor::kHilbertMaxWindowDefault;
             if (auto* editor = aw->getTextEditor ("maxwin"))
                 window = FREQTRAudioProcessor::getCanonicalHilbertWindow (editor->getText().getIntValue());
             bar->setValue (windowToBar (window));
@@ -4691,10 +4718,11 @@ void FREQTRAudioProcessorEditor::openChaosConfigPrompt (const char* amtParamId,
             const float newSpd = juce::jlimit (FREQTRAudioProcessor::kChaosSpdMin,
                                                 FREQTRAudioProcessor::kChaosSpdMax,
                                                 std::exp (spdLogMin + juce::jlimit (0.0f, 1.0f, spdBar->value) * spdLogRange));
-            auto tip = juce::String (juce::roundToInt (newAmt)) + "% | "
-                     + juce::String (juce::roundToInt (newSpd)) + " Hz";
-            safeThis->chaosFilterDisplay.setTooltip (tip);
-            safeThis->chaosDelayDisplay.setTooltip (tip);
+            auto tip = formatChaosTooltip (newAmt, newSpd);
+            if (juce::String (amtParamId) == FREQTRAudioProcessor::kParamChaosAmtFilter)
+                safeThis->chaosFilterDisplay.setTooltip (tip);
+            else
+                safeThis->chaosDelayDisplay.setTooltip (tip);
         }),
         false);
 }

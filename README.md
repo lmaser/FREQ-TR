@@ -127,6 +127,8 @@ Blend between AM, ring modulation, and frequency shift:
 
 Selects the FIR Hilbert window used by the frequency-shift side of the engine. It is exposed only for the `RM -> FREQ SHIFT` region because AM and RM do not need Hilbert sideband separation.
 
+Default `WIN` is `512`, with `MAX WIN` defaulting to `2048`.
+
 The plugin reports and aligns to the selected maximum Hilbert delay internally, so changing `WIN` does not change the effective host latency. Right-click `PDC` to set `MAX WIN`; `WIN` values above that maximum are processed at the selected cap. Window changes crossfade between the old and new Hilbert paths to avoid discontinuities.
 
 ### STYLE

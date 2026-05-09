@@ -66,7 +66,7 @@ private:
         juce::String getTextFromValue (double v) override
         {
             if (owner != nullptr && (this == &owner->inputSlider || this == &owner->outputSlider
-                || this == &owner->tiltSlider))
+                || this == &owner->tiltSlider || this == &owner->limThresholdSlider))
             {
                 juce::String t (v, 1);
                 if (t.containsChar ('.'))

@@ -785,8 +785,7 @@ private:
 	static constexpr float kJitterFeedbackFastShortnessWeight = 0.28f;
 	static constexpr float kJitterFeedbackOutputLimit = 1.0f;
 	static constexpr float kJitterFrequencyDepthScale = 2.0f;
-	static constexpr float kJitterFrequencyFloorHz = 60.0f;
-	static constexpr float kJitterLowFrequencyDepthHz = 10.0f;
+	static constexpr float kJitterFrequencyFloorHz = 250.0f;
 	static constexpr float kJitterFrequencyRateMinDelayMs = 4.0f;
 	static constexpr float kJitterFrequencyRateMaxDelayMs = 500.0f;
 	static constexpr float kJitterFrequencyRateCompression = 0.80f;
@@ -1137,14 +1136,10 @@ private:
 		if (! jitterActive_ || amt <= 0.000001f)
 			return baseFreq;
 
-		const float absBase = std::abs (baseFreq);
-		const float lowFrequencyDepth = smoothStep01 (absBase / kJitterLowFrequencyDepthHz);
-		if (lowFrequencyDepth <= 0.0f)
-			return baseFreq;
-
 		const int lane = juce::jlimit (0, 1, channel);
+		const float absBase = std::abs (baseFreq);
 		const float referenceHz = std::sqrt (absBase * absBase + kJitterFrequencyFloorHz * kJitterFrequencyFloorHz);
-		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f) * lowFrequencyDepth;
+		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f);
 		const float sign = (baseFreq < 0.0f) ? -1.0f : 1.0f;
 		const float jittered = baseFreq - sign * jitterFreqOut_[lane] * depthHz;
 

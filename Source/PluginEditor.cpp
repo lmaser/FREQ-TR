@@ -79,7 +79,7 @@ static juce::String formatRetrigTooltip (bool on)
 static juce::String formatPdcTooltip (bool on, int maxWindow)
 {
     return juce::String ("PDC ") + (on ? "ON" : "OFF")
-         + " / MAX WIN " + juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow (maxWindow));
+         + " | MAX WIN " + juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow (maxWindow));
 }
 
 static juce::String formatSidechainToneText (float hz)
@@ -96,7 +96,7 @@ static juce::String formatSidechainToneText (float hz)
 static juce::String formatSidechainTooltip (float time, float tone)
 {
     return "TIME x" + juce::String (juce::jlimit (0.0f, 1.0f, time), 2)
-         + " / TONE " + formatSidechainToneText (tone);
+         + " | TONE " + formatSidechainToneText (tone);
 }
 
 // ── Parameter listener IDs ──

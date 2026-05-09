@@ -90,7 +90,7 @@ public:
 	static constexpr float kFreqDefault =  0.0f;
 
 	static constexpr int kFreqSyncMin     = 0;
-	static constexpr int kFreqSyncMax     = 29;       // 30 divisions (0-29)
+	static constexpr int kFreqSyncMax     = 28;       // 29 divisions, ordered by real duration and capped at 8/1.
 	static constexpr int kFreqSyncDefault = 10;        // = "1/8" (index 10)
 
 	static constexpr float kModMin     = 0.0f;

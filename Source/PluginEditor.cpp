@@ -2109,7 +2109,9 @@ void FREQTRAudioProcessorEditor::updateFreqSliderForSyncMode()
         freqSyncAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts,
                                                                   FREQTRAudioProcessor::kParamFreqSync,
                                                                   freqSlider);
-        freqSlider.setRange (0.0, 29.0, 1.0);
+        freqSlider.setRange ((double) FREQTRAudioProcessor::kFreqSyncMin,
+                             (double) FREQTRAudioProcessor::kFreqSyncMax,
+                             1.0);
         freqSlider.setDoubleClickReturnValue (true, (double) FREQTRAudioProcessor::kFreqSyncDefault);
         freqSlider.setSkewFactor (1.0);
     }
@@ -2507,7 +2509,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         }
     }
     else if (&s == &modSlider)       { suffix = " X MOD";      suffixShort = " X"; }
-    else if (&s == &feedbackSlider)  { suffix = " % FEEDBACK"; suffixShort = " % FBK"; }
+    else if (&s == &feedbackSlider)  { suffix = " % FBK";      suffixShort = " % FBK"; }
     else if (&s == &jitterSlider)    { suffix = " % JITTER";   suffixShort = " % JIT"; }
     else if (&s == &combSlider)      { suffix = " HZ";         suffixShort = " HZ"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " %"; }
@@ -2704,7 +2706,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             if (isFreqSyncMode)
             {
                 minVal = 0.0;
-                maxVal = 29.0;
+                maxVal = (double) FREQTRAudioProcessor::kFreqSyncMax;
                 maxDecs = 0;
                 maxLen = 6;
             }
@@ -2945,7 +2947,9 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                     foundIndex = numericToken.getIntValue();
                 }
 
-                v = (double) juce::jlimit (0, 29, foundIndex);
+                v = (double) juce::jlimit (FREQTRAudioProcessor::kFreqSyncMin,
+                                           FREQTRAudioProcessor::kFreqSyncMax,
+                                           foundIndex);
             }
             else
             {
@@ -5510,10 +5514,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
             infoArea = infoArea.expanded (4, 0);
         if (infoArea.contains (pt))
         {
-            if (e.mods.isPopupMenu())
-                openGraphicsPopup();
-            else
-                openInfoPopup();
+            openInfoPopup();
             return;
         }
     }
@@ -5919,6 +5920,10 @@ juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Poin
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
             return (sliders[i]->isVisible() && sliders[i]->isEnabled()) ? sliders[i] : nullptr;
+
+    if (engineSlider.isVisible() && engineSlider.isEnabled()
+        && engineSlider.getBounds().getUnion (getValueAreaFor (engineSlider.getBounds())).contains (p))
+        return &engineSlider;
 
     return nullptr;
 }

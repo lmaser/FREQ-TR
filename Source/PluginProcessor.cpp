@@ -76,6 +76,49 @@ namespace
 		}
 	}
 
+	struct FreqSyncDivision
+	{
+		const char* label;
+		float quarterNotes;
+	};
+
+	constexpr FreqSyncDivision kFreqSyncDivisions[] =
+	{
+		{ "1/64T", 1.0f / 24.0f },
+		{ "1/64",  1.0f / 16.0f },
+		{ "1/32T", 1.0f / 12.0f },
+		{ "1/64.", 3.0f / 32.0f },
+		{ "1/32",  1.0f / 8.0f },
+		{ "1/16T", 1.0f / 6.0f },
+		{ "1/32.", 3.0f / 16.0f },
+		{ "1/16",  1.0f / 4.0f },
+		{ "1/8T",  1.0f / 3.0f },
+		{ "1/16.", 3.0f / 8.0f },
+		{ "1/8",   1.0f / 2.0f },
+		{ "1/4T",  2.0f / 3.0f },
+		{ "1/8.",  3.0f / 4.0f },
+		{ "1/4",   1.0f },
+		{ "1/2T",  4.0f / 3.0f },
+		{ "1/4.",  3.0f / 2.0f },
+		{ "1/2",   2.0f },
+		{ "1/1T",  8.0f / 3.0f },
+		{ "1/2.",  3.0f },
+		{ "1/1",   4.0f },
+		{ "2/1T", 16.0f / 3.0f },
+		{ "1/1.",  6.0f },
+		{ "2/1",   8.0f },
+		{ "4/1T", 32.0f / 3.0f },
+		{ "2/1.", 12.0f },
+		{ "4/1",  16.0f },
+		{ "8/1T", 64.0f / 3.0f },
+		{ "4/1.", 24.0f },
+		{ "8/1",  32.0f }
+	};
+
+	constexpr int kNumFreqSyncDivisions = (int) (sizeof (kFreqSyncDivisions) / sizeof (kFreqSyncDivisions[0]));
+	static_assert (kNumFreqSyncDivisions == FREQTRAudioProcessor::kFreqSyncMax + 1,
+	               "Freq sync table must match kFreqSyncMax.");
+
 	// ── Waveform generation (normalised phase 0..1 → output -1..1) ──
 
 
@@ -934,13 +977,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (retrigEnabled && ppqAvailable)
 		{
 			// Period in quarter-note beats
-			const int syncIdx = juce::jlimit (0, 29, freqSyncValue);
-			const float divisions[] = { 64.0f, 32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f };
-			const int baseIdx = syncIdx / 3;
-			const int modifier = syncIdx % 3;
-			float periodBeats = 4.0f / divisions[baseIdx]; // in quarter-note beats
-			if (modifier == 0)       periodBeats *= (2.0f / 3.0f); // triplet
-			else if (modifier == 2)  periodBeats *= 1.5f;          // dotted
+			const int syncIdx = juce::jlimit (kFreqSyncMin, kFreqSyncMax, freqSyncValue);
+			const float periodBeats = kFreqSyncDivisions[syncIdx].quarterNotes;
 
 			if (periodBeats > 0.0001f)
 			{
@@ -1913,7 +1951,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kParamFreq, "Frequency",
 		juce::NormalisableRange<float> (kFreqMin, kFreqMax, 0.0f, 0.35f), kFreqDefault));
 
-	// Frequency sync: choice parameter, 30 divisions, default index 10 ("1/8")
+	// Frequency sync: choice parameter, ordered by real duration and capped at 8/1.
 	params.push_back (std::make_unique<juce::AudioParameterChoice> (
 		kParamFreqSync, "Freq Sync", getFreqSyncChoices(), kFreqSyncDefault));
 
@@ -2238,18 +2276,10 @@ juce::String FREQTRAudioProcessor::getCurrentFreqDisplay() const
 
 juce::StringArray FREQTRAudioProcessor::getFreqSyncChoices()
 {
-	return {
-		"1/64T", "1/64", "1/64.",
-		"1/32T", "1/32", "1/32.",
-		"1/16T", "1/16", "1/16.",
-		"1/8T",  "1/8",  "1/8.",
-		"1/4T",  "1/4",  "1/4.",
-		"1/2T",  "1/2",  "1/2.",
-		"1/1T",  "1/1",  "1/1.",
-		"2/1T",  "2/1",  "2/1.",
-		"4/1T",  "4/1",  "4/1.",
-		"8/1T",  "8/1",  "8/1."
-	};
+	juce::StringArray choices;
+	for (const auto& division : kFreqSyncDivisions)
+		choices.add (division.label);
+	return choices;
 }
 
 juce::String FREQTRAudioProcessor::getFreqSyncName (int index)
@@ -2265,20 +2295,9 @@ float FREQTRAudioProcessor::tempoSyncToHz (int syncIndex, double bpm) const
 	if (bpm <= 0.0)
 		bpm = 120.0;
 
-	syncIndex = juce::jlimit (0, 29, syncIndex);
-
-	// divisions[i] = how many of this note fit in a whole note
-	const float divisions[] = { 64.0f, 32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f };
-	const int baseIndex = syncIndex / 3;
-	const int modifier  = syncIndex % 3;
-
+	syncIndex = juce::jlimit (kFreqSyncMin, kFreqSyncMax, syncIndex);
 	const float quarterNoteMs = (float) (60000.0 / bpm);
-	float durationMs = quarterNoteMs * (4.0f / divisions[baseIndex]);
-
-	if (modifier == 0)       // triplet
-		durationMs *= (2.0f / 3.0f);
-	else if (modifier == 2)  // dotted
-		durationMs *= 1.5f;
+	const float durationMs = quarterNoteMs * kFreqSyncDivisions[syncIndex].quarterNotes;
 
 	// Convert period → frequency: Hz = 1000 / ms
 	return (durationMs > 0.001f) ? (1000.0f / durationMs) : 0.0f;

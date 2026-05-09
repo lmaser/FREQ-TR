@@ -35,8 +35,8 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 The value column reflects the current context:
 - `FREQ`: hertz, note name, or sync division
 - `MOD`: frequency multiplier
-- `FEEDBACK`: percent
 - `COMB`: hertz
+- `FEEDBACK`: percent
 - `JITTER`: percent
 - `ENGINE`: percent blend
 - `WIN`: Hilbert window size for the frequency-shift path
@@ -92,6 +92,12 @@ Frequency multiplier applied to the effective frequency:
 - 50% = x1.0
 - 100% = x4.0
 
+### COMB (0-5000 Hz)
+
+Resonant frequency of the feedback delay line. Higher values shorten the feedback delay and raise the comb resonance.
+
+At 0 Hz the comb control is visually at its floor; when feedback is active, the internal feedback delay uses a safe 0.1 Hz effective minimum.
+
 ### FEEDBACK (0-100%)
 
 Feeds the wet output back into the Hilbert input. This creates barberpole-like stacks in frequency-shift mode and increasingly metallic recirculation in AM mode.
@@ -102,10 +108,6 @@ The feedback path includes:
 - DC blocking
 - feedback low-pass conditioning
 - safety limiting
-
-### COMB (5-5000 Hz)
-
-Resonant frequency of the feedback delay line. Higher values shorten the feedback delay and raise the comb resonance.
 
 ### JITTER (0-100%)
 

@@ -172,7 +172,7 @@ private:
         bool allowNumericPopup = true;
     };
 
-    // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, FEEDBACK, COMB, ENGINE, WIN, HARM, POLARITY, JIT, STYLE, TILT, PAN, LIMTHRESHOLD
+    // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, COMB, FEEDBACK, ENGINE, WIN, HARM, POLARITY, JIT, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
     BarSlider mixSlider;
@@ -449,7 +449,8 @@ private:
 
         void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
         {
-            label.setBounds (0, 0, box.getWidth(), box.getHeight());
+            label.setFont (getComboBoxFont (box));
+            label.setBounds (1, 1, box.getWidth() - 2, box.getHeight() - 2);
             label.setJustificationType (juce::Justification::centred);
         }
 

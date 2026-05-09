@@ -1920,15 +1920,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamMod, "Mod",
 		juce::NormalisableRange<float> (kModMin, kModMax, 0.0f, 1.0f), kModDefault));
+	// Comb: resonant frequency in Hz, controls the feedback delay pitch/period.
+	params.push_back (std::make_unique<juce::AudioParameterFloat> (
+		kParamComb, "Comb", makeCombFrequencyRange(), kCombDefault));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamFeedback, "Feedback",
 		juce::NormalisableRange<float> (kFeedbackMin, kFeedbackMax, 0.0f, 1.0f), kFeedbackDefault));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamJitter, "Jitter",
 		juce::NormalisableRange<float> (kJitterMin, kJitterMax, 0.001f, 1.0f), kJitterDefault));
-	// Comb: resonant frequency in Hz, controls the feedback delay pitch/period.
-	params.push_back (std::make_unique<juce::AudioParameterFloat> (
-		kParamComb, "Comb", makeCombFrequencyRange(), kCombDefault));
 	// Engine: 0 = AM, 0.5 = Ring Mod, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",

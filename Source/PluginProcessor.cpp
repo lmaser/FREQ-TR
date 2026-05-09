@@ -374,11 +374,14 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	{
 		const int maxWindow = getCanonicalHilbertWindow (
 			(int) std::lround (loadAtomicOrDefault (maxWindowParam, (float) kHilbertMaxWindowDefault)));
+		activeMaxHilbertWindow_ = maxWindow;
 		activeHilbertWindow_ = juce::jmin (getCanonicalHilbertWindow (
 			(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault))), maxWindow);
 	}
 	targetHilbertWindow_ = activeHilbertWindow_;
 	previousHilbertWindow_ = activeHilbertWindow_;
+	targetMaxHilbertWindow_ = activeMaxHilbertWindow_;
+	previousMaxHilbertWindow_ = activeMaxHilbertWindow_;
 	hilbertWindowCrossfadeRemaining_ = 0;
 	hilbertWindowCrossfadeTotal_ = 0;
 	for (auto& state : freqShiftHilbertIir_)
@@ -762,11 +765,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		loadAtomicOrDefault (combParam, kCombDefault));
 	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz));
 	const float engine = loadAtomicOrDefault (engineParam, kEngineDefault);
-	const int maxHilbertWindow = getCanonicalHilbertWindow (
+	const int requestedMaxHilbertWindow = getCanonicalHilbertWindow (
 		(int) std::lround (loadAtomicOrDefault (maxWindowParam, (float) kHilbertMaxWindowDefault)));
-	const int effectiveMaxDelay = getHilbertDelayForWindow (maxHilbertWindow);
-	const int targetHilbertWindow = juce::jmin (getCanonicalHilbertWindow (
-		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault))), maxHilbertWindow);
+	const int requestedMaxDelay = getHilbertDelayForWindow (requestedMaxHilbertWindow);
+	const int requestedHilbertWindow = getCanonicalHilbertWindow (
+		(int) std::lround (loadAtomicOrDefault (windowParam, (float) kHilbertWindowDefault)));
+	const int targetHilbertWindow = juce::jmin (requestedHilbertWindow, requestedMaxHilbertWindow);
 	const int   style  = loadIntParamOrDefault (styleParam, 0);
 	const float harm   = loadAtomicOrDefault (harmParam, kHarmDefault);
 	const float polarity = loadAtomicOrDefault (polarityParam, kPolarityDefault);
@@ -846,12 +850,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainCarrierSmoothCoeff = std::exp (-juce::MathConstants<float>::twoPi
 		* sidechainCarrierSmoothHz / (float) currentSampleRate);
 
-	setLatencySamples (pdcEnabled ? effectiveMaxDelay : 0);
+	setLatencySamples (pdcEnabled ? requestedMaxDelay : 0);
 
-	if (targetHilbertWindow != targetHilbertWindow_)
+	if (targetHilbertWindow != targetHilbertWindow_
+		|| requestedMaxHilbertWindow != targetMaxHilbertWindow_)
 	{
 		previousHilbertWindow_ = activeHilbertWindow_;
+		previousMaxHilbertWindow_ = activeMaxHilbertWindow_;
 		targetHilbertWindow_ = targetHilbertWindow;
+		targetMaxHilbertWindow_ = requestedMaxHilbertWindow;
 		hilbertWindowCrossfadeTotal_ = juce::jmax (1, (int) std::round (currentSampleRate * 0.030));
 		hilbertWindowCrossfadeRemaining_ = hilbertWindowCrossfadeTotal_;
 	}
@@ -1314,10 +1321,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		struct WetPair { float l = 0.0f, r = 0.0f; };
 
-		auto makeWindowWet = [&] (int window) -> WetPair
+		auto makeWindowWet = [&] (int window, int renderMaxWindow) -> WetPair
 		{
-			const int lane = getHilbertWindowLane (window);
-			const int firLength = window - 1;
+			const int clampedWindow = juce::jmin (getCanonicalHilbertWindow (window),
+				getCanonicalHilbertWindow (renderMaxWindow));
+			const int renderMaxDelay = getHilbertDelayForWindow (renderMaxWindow);
+			const int lane = getHilbertWindowLane (clampedWindow);
+			const int firLength = clampedWindow - 1;
 			const int half = firLength / 2;
 			const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
 
@@ -1452,7 +1462,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				}
 			}
 
-			const int pad = juce::jmax (0, effectiveMaxDelay - half);
+			const int pad = juce::jmax (0, renderMaxDelay - half);
 			hilbertWetCompBuf_[lane][0][hilbertPos] = coreL;
 			hilbertWetCompBuf_[lane][1][hilbertPos] = coreR;
 			const int compIdx = (hilbertPos - pad + order) & orderMask;
@@ -1461,34 +1471,54 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		};
 
 		WetPair wetPair;
+		const bool hilbertWindowCrossfadeActive = hilbertWindowCrossfadeRemaining_ > 0
+			&& hilbertWindowCrossfadeTotal_ > 0;
+		const float hilbertWindowCrossfadeProgress = hilbertWindowCrossfadeActive
+			? (1.0f - ((float) hilbertWindowCrossfadeRemaining_
+			           / (float) hilbertWindowCrossfadeTotal_))
+			: 1.0f;
+		const float hilbertWindowOldMix = hilbertWindowCrossfadeActive
+			? std::cos (hilbertWindowCrossfadeProgress * juce::MathConstants<float>::halfPi)
+			: 0.0f;
+		const float hilbertWindowNewMix = hilbertWindowCrossfadeActive
+			? std::sin (hilbertWindowCrossfadeProgress * juce::MathConstants<float>::halfPi)
+			: 1.0f;
+		const int previousHilbertWindowForCrossfade = previousHilbertWindow_;
+		const int targetHilbertWindowForCrossfade = targetHilbertWindow_;
+		const int previousMaxHilbertWindowForCrossfade = previousMaxHilbertWindow_;
+		const int targetMaxHilbertWindowForCrossfade = targetMaxHilbertWindow_;
+
 		const bool needsDualWindowRender = smoothedEngine > 0.5f
 			|| engine > 0.5f
-			|| (hilbertWindowCrossfadeRemaining_ > 0 && hilbertWindowCrossfadeTotal_ > 0);
+			|| hilbertWindowCrossfadeActive;
 
 		if (needsDualWindowRender)
 		{
-			std::array<WetPair, kNumHilbertWindows> wetByWindow {};
-			const int maxWindowLane = getHilbertWindowLane (maxHilbertWindow);
-			for (int lane = 0; lane <= maxWindowLane; ++lane)
-				wetByWindow[(size_t) lane] = makeWindowWet (kHilbertWindows[lane]);
-			for (int lane = maxWindowLane + 1; lane < kNumHilbertWindows; ++lane)
-				wetByWindow[(size_t) lane] = wetByWindow[(size_t) maxWindowLane];
-
-			auto selectWet = [&] (int window) noexcept -> WetPair
+			auto renderWetByWindow = [&] (int renderMaxWindow)
 			{
-				return wetByWindow[(size_t) getHilbertWindowLane (window)];
+				std::array<WetPair, kNumHilbertWindows> wetByWindow {};
+				const int maxWindowLane = getHilbertWindowLane (renderMaxWindow);
+				for (int lane = 0; lane <= maxWindowLane; ++lane)
+					wetByWindow[(size_t) lane] = makeWindowWet (kHilbertWindows[lane], renderMaxWindow);
+				for (int lane = maxWindowLane + 1; lane < kNumHilbertWindows; ++lane)
+					wetByWindow[(size_t) lane] = wetByWindow[(size_t) maxWindowLane];
+				return wetByWindow;
 			};
 
-			if (hilbertWindowCrossfadeRemaining_ > 0 && hilbertWindowCrossfadeTotal_ > 0)
+			auto selectWet = [] (const std::array<WetPair, kNumHilbertWindows>& wetByWindow,
+			                     int window) noexcept -> WetPair
 			{
-				const WetPair oldWet = selectWet (previousHilbertWindow_);
-				const WetPair newWet = selectWet (targetHilbertWindow_);
-				const float progress = 1.0f - ((float) hilbertWindowCrossfadeRemaining_
-				                               / (float) hilbertWindowCrossfadeTotal_);
-				const float oldMix = std::cos (progress * juce::MathConstants<float>::halfPi);
-				const float newMix = std::sin (progress * juce::MathConstants<float>::halfPi);
-				wetPair.l = oldWet.l * oldMix + newWet.l * newMix;
-				wetPair.r = oldWet.r * oldMix + newWet.r * newMix;
+				return wetByWindow[(size_t) FREQTRAudioProcessor::getHilbertWindowLane (window)];
+			};
+
+			if (hilbertWindowCrossfadeActive)
+			{
+				const auto oldWetByWindow = renderWetByWindow (previousMaxHilbertWindowForCrossfade);
+				const auto newWetByWindow = renderWetByWindow (targetMaxHilbertWindowForCrossfade);
+				const WetPair oldWet = selectWet (oldWetByWindow, previousHilbertWindowForCrossfade);
+				const WetPair newWet = selectWet (newWetByWindow, targetHilbertWindowForCrossfade);
+				wetPair.l = oldWet.l * hilbertWindowOldMix + newWet.l * hilbertWindowNewMix;
+				wetPair.r = oldWet.r * hilbertWindowOldMix + newWet.r * hilbertWindowNewMix;
 
 				--hilbertWindowCrossfadeRemaining_;
 				if (hilbertWindowCrossfadeRemaining_ <= 0)
@@ -1496,21 +1526,28 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					hilbertWindowCrossfadeRemaining_ = 0;
 					hilbertWindowCrossfadeTotal_ = 0;
 					activeHilbertWindow_ = targetHilbertWindow_;
+					activeMaxHilbertWindow_ = targetMaxHilbertWindow_;
 					previousHilbertWindow_ = activeHilbertWindow_;
+					previousMaxHilbertWindow_ = activeMaxHilbertWindow_;
 				}
 			}
 			else
 			{
 				if (activeHilbertWindow_ != targetHilbertWindow_)
 					activeHilbertWindow_ = targetHilbertWindow_;
-				wetPair = selectWet (activeHilbertWindow_);
+				if (activeMaxHilbertWindow_ != targetMaxHilbertWindow_)
+					activeMaxHilbertWindow_ = targetMaxHilbertWindow_;
+				const auto wetByWindow = renderWetByWindow (activeMaxHilbertWindow_);
+				wetPair = selectWet (wetByWindow, activeHilbertWindow_);
 			}
 		}
 		else
 		{
 			if (activeHilbertWindow_ != targetHilbertWindow_)
 				activeHilbertWindow_ = targetHilbertWindow_;
-			wetPair = makeWindowWet (activeHilbertWindow_);
+			if (activeMaxHilbertWindow_ != targetMaxHilbertWindow_)
+				activeMaxHilbertWindow_ = targetMaxHilbertWindow_;
+			wetPair = makeWindowWet (activeHilbertWindow_, activeMaxHilbertWindow_);
 		}
 
 		float wetL = wetPair.l;
@@ -1660,11 +1697,27 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// ── Mix dry/wet with Sum Bus routing ──
 		// Use clean delay buffer for dry reference (feedback-free)
-		const int dryDelayIdx = (hilbertPos - effectiveMaxDelay + order) & orderMask;
-		const float cleanDryL = cleanDelayBufL[(size_t) dryDelayIdx];
-		const float cleanDryR = cleanDelayBufR[(size_t) dryDelayIdx];
-		const float dryRefL = alignEnabled ? cleanDryL : inL;
-		const float dryRefR = alignEnabled ? cleanDryR : inR;
+		auto readCleanDry = [&] (int renderMaxWindow) noexcept -> WetPair
+		{
+			const int delay = getHilbertDelayForWindow (renderMaxWindow);
+			const int dryDelayIdx = (hilbertPos - delay + order) & orderMask;
+			return { cleanDelayBufL[(size_t) dryDelayIdx],
+			         cleanDelayBufR[(size_t) dryDelayIdx] };
+		};
+		WetPair cleanDry;
+		if (hilbertWindowCrossfadeActive)
+		{
+			const WetPair oldDry = readCleanDry (previousMaxHilbertWindowForCrossfade);
+			const WetPair newDry = readCleanDry (targetMaxHilbertWindowForCrossfade);
+			cleanDry.l = oldDry.l * hilbertWindowOldMix + newDry.l * hilbertWindowNewMix;
+			cleanDry.r = oldDry.r * hilbertWindowOldMix + newDry.r * hilbertWindowNewMix;
+		}
+		else
+		{
+			cleanDry = readCleanDry (activeMaxHilbertWindow_);
+		}
+		const float dryRefL = alignEnabled ? cleanDry.l : inL;
+		const float dryRefR = alignEnabled ? cleanDry.r : inR;
 		float wL = wetL * smoothedInputGain * smoothedOutputGain;
 		float wR = wetR * smoothedInputGain * smoothedOutputGain;
 		if (limMode == 1)

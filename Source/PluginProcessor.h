@@ -327,6 +327,9 @@ private:
 	int activeHilbertWindow_ = kHilbertWindowDefault;
 	int targetHilbertWindow_ = kHilbertWindowDefault;
 	int previousHilbertWindow_ = kHilbertWindowDefault;
+	int activeMaxHilbertWindow_ = kHilbertMaxWindowDefault;
+	int targetMaxHilbertWindow_ = kHilbertMaxWindowDefault;
+	int previousMaxHilbertWindow_ = kHilbertMaxWindowDefault;
 	int hilbertWindowCrossfadeRemaining_ = 0;
 	int hilbertWindowCrossfadeTotal_ = 0;
 	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};

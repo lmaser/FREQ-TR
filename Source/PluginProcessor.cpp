@@ -37,6 +37,26 @@ namespace
 		                                       FREQTRAudioProcessor::kGainSkew);
 	}
 
+	inline juce::NormalisableRange<float> makeCombFrequencyRange() noexcept
+	{
+		return juce::NormalisableRange<float> (
+			FREQTRAudioProcessor::kCombMin,
+			FREQTRAudioProcessor::kCombMax,
+			[] (float rangeStart, float rangeEnd, float normalised) noexcept
+			{
+				const float minHz = juce::jmax (0.000001f, rangeStart);
+				const float maxHz = juce::jmax (minHz, rangeEnd);
+				return minHz * std::pow (maxHz / minHz, juce::jlimit (0.0f, 1.0f, normalised));
+			},
+			[] (float rangeStart, float rangeEnd, float value) noexcept
+			{
+				const float minHz = juce::jmax (0.000001f, rangeStart);
+				const float maxHz = juce::jmax (minHz, rangeEnd);
+				const float clamped = juce::jlimit (minHz, maxHz, value);
+				return std::log (clamped / minHz) / std::log (maxHz / minHz);
+			});
+	}
+
 	inline void setParameterPlainValue (juce::AudioProcessorValueTreeState& apvts,
 										const char* paramId,
 										float plainValue)
@@ -1899,8 +1919,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		juce::NormalisableRange<float> (kJitterMin, kJitterMax, 0.001f, 1.0f), kJitterDefault));
 	// Comb: resonant frequency in Hz, controls the feedback delay pitch/period.
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
-		kParamComb, "Comb",
-		juce::NormalisableRange<float> (kCombMin, kCombMax, 0.01f, 0.35f), kCombDefault));
+		kParamComb, "Comb", makeCombFrequencyRange(), kCombDefault));
 	// Engine: 0 = AM, 0.5 = Ring Mod, 1 = Freq Shift (continuous blend)
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamEngine, "Engine",

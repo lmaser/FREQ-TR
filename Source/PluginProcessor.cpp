@@ -417,8 +417,9 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
 	feedbackLastL = 0.0f;
 	feedbackLastR = 0.0f;
-	std::memset (fbkDelayBufL, 0, sizeof (fbkDelayBufL));
-	std::memset (fbkDelayBufR, 0, sizeof (fbkDelayBufR));
+	fbkDelaySize = juce::jmax (2, (int) std::ceil (currentSampleRate / (double) kCombMin) + 2);
+	fbkDelayBufL.assign ((size_t) fbkDelaySize, 0.0f);
+	fbkDelayBufR.assign ((size_t) fbkDelaySize, 0.0f);
 	fbkDelayWritePos = 0;
 	{
 		const float initCombHz = juce::jlimit (kCombMin, kCombMax, loadAtomicOrDefault (combParam, kCombDefault));
@@ -1182,14 +1183,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// Smooth the comb size to avoid clicks
 		const float jitteredTargetComb = applyJitterToCombTarget (targetComb);
 		smoothedComb_ = smoothedComb_ * 0.999f + jitteredTargetComb * 0.001f;
-		const int combSamples = juce::jlimit (1, kFbkDelayMaxSamples,
+		const int combSamples = juce::jlimit (1, juce::jmax (1, fbkDelaySize),
 			(int) std::round (smoothedComb_));
 
 		// Read feedback from delay line at Comb offset
-		const int fbReadPos = (fbkDelayWritePos - combSamples + kFbkDelayMaxSamples)
-			% kFbkDelayMaxSamples;
-		const float fbSrcL = (style == 2) ? fbkDelayBufR[fbReadPos] : fbkDelayBufL[fbReadPos];
-		const float fbSrcR = (style == 2) ? fbkDelayBufL[fbReadPos] : fbkDelayBufR[fbReadPos];
+		const int fbReadPos = (fbkDelayWritePos - combSamples + fbkDelaySize)
+			% fbkDelaySize;
+		const float fbSrcL = (style == 2) ? fbkDelayBufR[(size_t) fbReadPos] : fbkDelayBufL[(size_t) fbReadPos];
+		const float fbSrcR = (style == 2) ? fbkDelayBufL[(size_t) fbReadPos] : fbkDelayBufR[(size_t) fbReadPos];
 
 		// ── PRE wet filter (HP + LP) ── applied to input before effect
 		if (filterPre_ && (hpOn || lpOn))
@@ -1559,9 +1560,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				dcBlockTick (biquadTick (wetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
 			const float condR = juce::jlimit (-4.0f, 4.0f,
 				dcBlockTick (biquadTick (wetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
-			fbkDelayBufL[fbkDelayWritePos] = condL;
-			fbkDelayBufR[fbkDelayWritePos] = condR;
-			fbkDelayWritePos = (fbkDelayWritePos + 1) % kFbkDelayMaxSamples;
+			fbkDelayBufL[(size_t) fbkDelayWritePos] = condL;
+			fbkDelayBufR[(size_t) fbkDelayWritePos] = condR;
+			fbkDelayWritePos = (fbkDelayWritePos + 1) % fbkDelaySize;
 		}
 
 		// ── Advance chaos S&H ──
@@ -1896,7 +1897,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamJitter, "Jitter",
 		juce::NormalisableRange<float> (kJitterMin, kJitterMax, 0.001f, 1.0f), kJitterDefault));
-	// Comb: resonant frequency in Hz (5..750), controls feedback comb pitch
+	// Comb: resonant frequency in Hz, controls the feedback delay pitch/period.
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamComb, "Comb",
 		juce::NormalisableRange<float> (kCombMin, kCombMax, 0.01f, 0.35f), kCombDefault));

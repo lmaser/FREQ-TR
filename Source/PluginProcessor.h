@@ -105,7 +105,7 @@ public:
 	static constexpr float kJitterMax     = 1.0f;
 	static constexpr float kJitterDefault = 0.0f;
 
-	static constexpr float kCombMin     = 5.0f;
+	static constexpr float kCombMin     = 0.1f;
 	static constexpr float kCombMax     = 5000.0f;
 	static constexpr float kCombDefault = 5.0f;
 
@@ -491,9 +491,8 @@ private:
 	float feedbackLastR = 0.0f;
 
 	// ── Feedback delay line (Comb-controlled resonant frequency) ──
-	static constexpr int kFbkDelayMaxSamples = 65536;
-	float fbkDelayBufL[kFbkDelayMaxSamples] = {};
-	float fbkDelayBufR[kFbkDelayMaxSamples] = {};
+	std::vector<float> fbkDelayBufL, fbkDelayBufR;
+	int   fbkDelaySize = 1;
 	int   fbkDelayWritePos = 0;
 	float smoothedComb_ = 5.0f;
 
@@ -1162,7 +1161,7 @@ private:
 		if (! jitterActive_ || amt <= 0.000001f || combSamples <= 1.0f)
 			return combSamples;
 
-		return juce::jlimit (1.0f, (float) kFbkDelayMaxSamples,
+		return juce::jlimit (1.0f, (float) juce::jmax (1, fbkDelaySize),
 			combSamples * std::exp2 (jitterCombOut_ * jitterCombDepthOct_));
 	}
 

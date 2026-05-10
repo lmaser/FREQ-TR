@@ -708,6 +708,7 @@ private:
 
 	// Precomputed sampleRate-dependent smooth coefficients (set in prepareToPlay)
 	float cachedFreqEmaCoeff_            = 0.999f;
+	float cachedParamEmaCoeff_           = 0.999f;
 	float cachedChaosParamSmoothCoeff_   = 0.999f;
 	float chaosDelaySmoothStep_          = 0.001f;
 

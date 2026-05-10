@@ -578,7 +578,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	resetJitterState();
 
 	// Precompute sampleRate-dependent smooth coefficients
-	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
+	cachedFreqEmaCoeff_          = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
+	cachedParamEmaCoeff_         = std::exp (-1.0f / ((float) currentSampleRate * 0.005f));
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 	chaosDelaySmoothStep_        = 1.0f - std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
 	jitterParamSmoothCoeff_      = std::exp (-1.0f / ((float) currentSampleRate * (float) kJitterSmoothingSeconds));
@@ -1000,7 +1001,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	targetFreq *= freqMultiplier * polarity;
 	targetFreq = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, targetFreq);
 
-	// Frequency smoothing (EMA, ~5ms) with MIDI glide support
+	// Frequency smoothing (EMA, ~10 ms) with MIDI glide support
 	float freqCoeff = cachedFreqEmaCoeff_;
 
 	// MIDI velocity-controlled glide
@@ -1018,7 +1019,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	}
 
 	// EMA coefficient for mix/engine/harm (~5 ms)
-	const float paramCoeff = cachedFreqEmaCoeff_;
+	const float paramCoeff = cachedParamEmaCoeff_;
 
 	feedbackSmoothed.setTargetValue (targetFeedback);
 

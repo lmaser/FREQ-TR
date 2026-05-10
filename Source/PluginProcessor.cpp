@@ -459,6 +459,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 		state.reset();
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
+	amRmOscPhase = 0.0;
+	amRmOscPhaseR = 0.0;
 	smoothedFreq = 0.0f;
 	smoothedEngine = 0.0f;
 	smoothedHarm = 0.0f;
@@ -583,6 +585,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	cachedChaosParamSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
 	chaosDelaySmoothStep_        = 1.0f - std::exp (-1.0f / ((float) currentSampleRate * 0.002f));
 	jitterParamSmoothCoeff_      = std::exp (-1.0f / ((float) currentSampleRate * (float) kJitterSmoothingSeconds));
+	amRmJitterDeviationCoeff_    = std::exp (-1.0f / ((float) currentSampleRate * kAmRmJitterDeviationSmoothTauSeconds));
 
 	// Limiter state reset
 	limEnv1_[0] = limEnv1_[1] = kLimFloor;
@@ -601,6 +604,7 @@ void FREQTRAudioProcessor::resetJitterState() noexcept
 	jitterStereo_ = false;
 	jitterFreqOut_[0] = jitterFreqOut_[1] = 0.0f;
 	jitterFreqDepthOct_[0] = jitterFreqDepthOct_[1] = 0.0f;
+	amRmJitterDeviationSmoothed_[0] = amRmJitterDeviationSmoothed_[1] = 0.0f;
 	jitterFeedbackOut_ = 0.0f;
 	jitterFeedbackDepth_ = 0.0f;
 	jitterCombOut_ = 0.0f;
@@ -1125,6 +1129,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int sumBusVal  = loadIntParamOrDefault (sumBusParam,  kSumBusDefault);
 	double syncPhaseAccumL = syncRetrigPhase;
 	double syncPhaseAccumR = syncRetrigPhase;
+	double syncAmRmPhaseAccumL = syncRetrigPhase;
+	double syncAmRmPhaseAccumR = syncRetrigPhase;
 
 	auto processSidechainTone = [&] (float x, SidechainToneFilterState& state) noexcept
 	{
@@ -1169,12 +1175,30 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		const float jitteredFreqL = getJitteredFrequencyHz (baseFreqL, 0);
 		const float jitteredFreqR = getJitteredFrequencyHz (baseFreqR, 1);
+		const float amRmJitteredFreqL = getAmRmJitteredFrequencyHz (baseFreqL, 0);
+		const float amRmJitteredFreqR = getAmRmJitteredFrequencyHz (baseFreqR, 1);
+		const float amRmJitterDevTargetL = amRmJitteredFreqL - baseFreqL;
+		const float amRmJitterDevTargetR = amRmJitteredFreqR - baseFreqR;
+		amRmJitterDeviationSmoothed_[0] = amRmJitterDeviationCoeff_ * amRmJitterDeviationSmoothed_[0]
+			+ (1.0f - amRmJitterDeviationCoeff_) * amRmJitterDevTargetL;
+		amRmJitterDeviationSmoothed_[1] = amRmJitterDeviationCoeff_ * amRmJitterDeviationSmoothed_[1]
+			+ (1.0f - amRmJitterDeviationCoeff_) * amRmJitterDevTargetR;
+		if (std::abs (amRmJitterDevTargetL) < 1.0e-5f && std::abs (amRmJitterDeviationSmoothed_[0]) < 1.0e-5f)
+			amRmJitterDeviationSmoothed_[0] = 0.0f;
+		if (std::abs (amRmJitterDevTargetR) < 1.0e-5f && std::abs (amRmJitterDeviationSmoothed_[1]) < 1.0e-5f)
+			amRmJitterDeviationSmoothed_[1] = 0.0f;
+		const float amRmFreqL = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f,
+			baseFreqL + amRmJitterDeviationSmoothed_[0]);
+		const float amRmFreqR = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f,
+			baseFreqR + amRmJitterDeviationSmoothed_[1]);
 
 		// ── Phase: retrig from PPQ or free-running ──
 		if (useSyncRetrigPhase)
 		{
 			oscPhase = syncPhaseAccumL;
 			oscPhase -= std::floor (oscPhase);
+			amRmOscPhase = syncAmRmPhaseAccumL;
+			amRmOscPhase -= std::floor (amRmOscPhase);
 		}
 
 		// R-channel phase: only DUAL uses a different rate (×0.5)
@@ -1183,6 +1207,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		{
 			oscPhaseR = syncPhaseAccumR;
 			oscPhaseR -= std::floor (oscPhaseR);
+			amRmOscPhaseR = syncAmRmPhaseAccumR;
+			amRmOscPhaseR -= std::floor (amRmOscPhaseR);
 		}
 
 		const float inL = (writeL != nullptr) ? writeL[n] : 0.0f;
@@ -1376,14 +1402,19 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const auto freqShiftIirL = freqShiftHilbertIir_[0].process (fbInL);
 		const auto freqShiftIirR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
 
-		// Harmonic oscillator pair (fullness/slope profile, RMS-normalized)
-		const auto harmPairL = fastHarmonicOscPair ((float) oscPhase, smoothedHarm, jitteredFreqL);
-		const auto harmPairR = fastHarmonicOscPair ((float) oscPhaseR, smoothedHarm, jitteredFreqR);
+		// Harmonic oscillator pairs (fullness/slope profile, RMS-normalized).
+		// AM/RM uses a separately smoothed jitter deviation to avoid audio-rate carrier crackle.
+		const auto amRmHarmPairL = fastHarmonicOscPair ((float) amRmOscPhase, smoothedHarm, amRmFreqL);
+		const auto amRmHarmPairR = fastHarmonicOscPair ((float) amRmOscPhaseR, smoothedHarm, amRmFreqR);
+		const auto fsHarmPairL = fastHarmonicOscPair ((float) oscPhase, smoothedHarm, jitteredFreqL);
+		const auto fsHarmPairR = fastHarmonicOscPair ((float) oscPhaseR, smoothedHarm, jitteredFreqR);
 
-		const float oscWave     = harmPairL.sine;
-		const float oscWaveCos  = harmPairL.cosine;
-		const float oscWaveR    = harmPairR.sine;
-		const float oscWaveCosR = harmPairR.cosine;
+		const float amRmWave  = amRmHarmPairL.sine;
+		const float amRmWaveR = amRmHarmPairR.sine;
+		const float fsWave     = fsHarmPairL.sine;
+		const float fsWaveCos  = fsHarmPairL.cosine;
+		const float fsWaveR    = fsHarmPairR.sine;
+		const float fsWaveCosR = fsHarmPairR.cosine;
 
 		// ── Engine blend: AM (0) -> RM (0.5) -> Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
@@ -1462,7 +1493,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					return 1.0f + t * (carrier - 1.0f);
 				};
 
-				const float rawCarrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : oscWave;
+				const float rawCarrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : amRmWave;
 				const float rawCarrierWaveR = sidechainEnabled
 					? (useStereoInput
 						? (style == 2 ? -sidechainNormSignedCarrierL
@@ -1470,29 +1501,29 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 						                : sidechainNormSignedCarrierR))
 						: sidechainNormSignedCarrierL)
 					: (useStereoInput
-						? (style == 2 ? -oscWave
-						  : (style == 3 ? oscWaveR
-						                : oscWave))
-						: oscWave);
+						? (style == 2 ? -amRmWave
+						  : (style == 3 ? amRmWaveR
+						                : amRmWave))
+						: amRmWave);
 
 				const float carrierWaveL = sidechainEnabled
 					? rawCarrierWaveL
-					: makeDcSafeCarrier (rawCarrierWaveL, jitteredFreqL);
+					: makeDcSafeCarrier (rawCarrierWaveL, baseFreqL);
 				const float carrierWaveR = sidechainEnabled
 					? rawCarrierWaveR
-					: makeDcSafeCarrier (rawCarrierWaveR, jitteredFreqR);
+					: makeDcSafeCarrier (rawCarrierWaveR, baseFreqR);
 
 				const float rmCarrierWaveL = carrierWaveL;
 				const float rmCarrierWaveR = carrierWaveR;
 
-				const float fsCosL = sidechainEnabled ? sidechainNormL.first : oscWaveCos;
-				const float fsSinL = sidechainEnabled ? sidechainNormL.second * sidechainPolaritySign : oscWave;
+				const float fsCosL = sidechainEnabled ? sidechainNormL.first : fsWaveCos;
+				const float fsSinL = sidechainEnabled ? sidechainNormL.second * sidechainPolaritySign : fsWave;
 				const float fsCosR = sidechainEnabled
 					? (style == 3 ? sidechainNormR.first : sidechainNormL.first)
-					: (style == 3 ? oscWaveCosR : oscWaveCos);
+					: (style == 3 ? fsWaveCosR : fsWaveCos);
 				const float fsSinR = sidechainEnabled
 					? ((style == 3 ? sidechainNormR.second : sidechainNormL.second) * sidechainPolaritySign)
-					: (style == 3 ? oscWaveR : oscWave);
+					: (style == 3 ? fsWaveR : fsWave);
 
 				const float amL = realL * amEnvelope (carrierWaveL, sidechainDepth);
 				const float amR = useStereoInput ? (realR * amEnvelope (carrierWaveR, sidechainDepth)) : amL;
@@ -1866,6 +1897,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			syncPhaseAccumR += (double) jitteredFreqR * (double) invSr;
 			syncPhaseAccumR -= std::floor (syncPhaseAccumR);
 			oscPhaseR = syncPhaseAccumR;
+
+			syncAmRmPhaseAccumL += (double) amRmFreqL * (double) invSr;
+			syncAmRmPhaseAccumL -= std::floor (syncAmRmPhaseAccumL);
+			amRmOscPhase = syncAmRmPhaseAccumL;
+
+			syncAmRmPhaseAccumR += (double) amRmFreqR * (double) invSr;
+			syncAmRmPhaseAccumR -= std::floor (syncAmRmPhaseAccumR);
+			amRmOscPhaseR = syncAmRmPhaseAccumR;
 		}
 		else
 		{
@@ -1874,6 +1913,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) jitteredFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
+
+			amRmOscPhase += (double) amRmFreqL * (double) invSr;
+			amRmOscPhase -= std::floor (amRmOscPhase);
+
+			amRmOscPhaseR += (double) amRmFreqR * (double) invSr;
+			amRmOscPhaseR -= std::floor (amRmOscPhaseR);
 		}
 
 		hilbertPos = (hilbertPos + 1) & orderMask;

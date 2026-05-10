@@ -420,6 +420,8 @@ private:
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	double oscPhaseR = 0.0;        // R-channel phase (WIDE/DUAL: different rate)
+	double amRmOscPhase = 0.0;     // AM/RM carrier phase, jitter-smoothed separately
+	double amRmOscPhaseR = 0.0;
 
 	// ── Sine look-up table (linear interpolation, 4096 entries) ──
 	static constexpr int kSineLutSize = 4096;
@@ -790,10 +792,13 @@ private:
 	static constexpr float kJitterFrequencyRateMinDelayMs = 4.0f;
 	static constexpr float kJitterFrequencyRateMaxDelayMs = 500.0f;
 	static constexpr float kJitterFrequencyRateCompression = 0.80f;
+	static constexpr float kAmRmJitterDeviationSmoothTauSeconds = 0.00075f;
 
 	float jitterTargetNorm_              = 0.0f;
 	float jitterAmountSmoothed_          = 0.0f;
 	float jitterParamSmoothCoeff_        = 0.999f;
+	float amRmJitterDeviationCoeff_      = 0.999f;
+	float amRmJitterDeviationSmoothed_[2] = {};
 	bool  jitterParamSmoothReady_        = false;
 	bool  jitterActive_                  = false;
 	bool  jitterStereo_                  = false;
@@ -1141,6 +1146,21 @@ private:
 		const float absBase = std::abs (baseFreq);
 		const float referenceHz = std::sqrt (absBase * absBase + kJitterFrequencyFloorHz * kJitterFrequencyFloorHz);
 		const float depthHz = referenceHz * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f);
+		const float sign = (baseFreq < 0.0f) ? -1.0f : 1.0f;
+		const float jittered = baseFreq - sign * jitterFreqOut_[lane] * depthHz;
+
+		return juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, jittered);
+	}
+
+	inline float getAmRmJitteredFrequencyHz (float baseFreq, int channel) const noexcept
+	{
+		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+		const float absBase = std::abs (baseFreq);
+		if (! jitterActive_ || amt <= 0.000001f || absBase <= 0.000001f)
+			return baseFreq;
+
+		const int lane = juce::jlimit (0, 1, channel);
+		const float depthHz = absBase * (std::exp2 (jitterFreqDepthOct_[lane]) - 1.0f);
 		const float sign = (baseFreq < 0.0f) ? -1.0f : 1.0f;
 		const float jittered = baseFreq - sign * jitterFreqOut_[lane] * depthHz;
 

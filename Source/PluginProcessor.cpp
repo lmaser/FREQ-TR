@@ -1454,8 +1454,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float sidechainDepth = sidechainEnabled
 					? juce::jlimit (0.0f, 1.0f, sidechainDepthSmoothed_)
 					: 1.0f;
-				const float carrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : oscWave;
-				const float carrierWaveR = sidechainEnabled
+				const auto makeDcSafeCarrier = [] (float carrier, float freqHz) noexcept
+				{
+					constexpr float kDcIdentityFadeHz = 0.25f;
+					const float t = smoothStep01 (std::abs (freqHz) / kDcIdentityFadeHz);
+					return 1.0f + t * (carrier - 1.0f);
+				};
+
+				const float rawCarrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : oscWave;
+				const float rawCarrierWaveR = sidechainEnabled
 					? (useStereoInput
 						? (style == 2 ? -sidechainNormSignedCarrierL
 						  : (style == 3 ? sidechainNormSignedCarrierR
@@ -1467,18 +1474,15 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 						                : oscWave))
 						: oscWave);
 
-				const float rmCarrierWaveL = sidechainEnabled ? sidechainNormSignedCarrierL : oscWave;
-				const float rmCarrierWaveR = sidechainEnabled
-					? (useStereoInput
-						? (style == 2 ? -sidechainNormSignedCarrierL
-						  : (style == 3 ? sidechainNormSignedCarrierR
-						                : sidechainNormSignedCarrierR))
-						: sidechainNormSignedCarrierL)
-					: (useStereoInput
-						? (style == 2 ? -oscWave
-						  : (style == 3 ? oscWaveR
-						                : oscWave))
-						: oscWave);
+				const float carrierWaveL = sidechainEnabled
+					? rawCarrierWaveL
+					: makeDcSafeCarrier (rawCarrierWaveL, jitteredFreqL);
+				const float carrierWaveR = sidechainEnabled
+					? rawCarrierWaveR
+					: makeDcSafeCarrier (rawCarrierWaveR, jitteredFreqR);
+
+				const float rmCarrierWaveL = carrierWaveL;
+				const float rmCarrierWaveR = carrierWaveR;
 
 				const float fsCosL = sidechainEnabled ? sidechainNormL.first : oscWaveCos;
 				const float fsSinL = sidechainEnabled ? sidechainNormL.second * sidechainPolaritySign : oscWave;

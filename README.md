@@ -83,7 +83,7 @@ When `SIDECHAIN` is active, the internal oscillator carrier is replaced by the s
 
 ### FREQ SYNC
 
-30 tempo divisions, covering triplet / straight / dotted variants from fast divisions to long musical values.
+29 tempo divisions, ordered by real duration and capped at `8/1`, covering fast triplet / straight / dotted divisions through long musical values.
 
 ### MOD
 

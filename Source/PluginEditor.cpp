@@ -2055,6 +2055,33 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         }
     }
 
+    auto setLabelOnly = [] (juce::String& full, juce::String& shortText, juce::String& intOnly,
+                             const char* label, const char* shortLabel = nullptr)
+    {
+        full = label;
+        shortText = shortLabel != nullptr ? shortLabel : label;
+        intOnly = shortText;
+    };
+
+    const bool sidechainOn = sidechainButton.getToggleState();
+    const bool freqShiftActive = (engineSlider.getValue() > 0.5);
+
+    if (sidechainOn)
+    {
+        setLabelOnly (cachedFreqTextFull, cachedFreqTextShort, cachedFreqIntOnly, "FREQ");
+        setLabelOnly (cachedModTextFull, cachedModTextShort, cachedModIntOnly, "MOD");
+    }
+
+    if (sidechainOn || ! freqShiftActive)
+    {
+        setLabelOnly (cachedHarmTextFull, cachedHarmTextShort, cachedHarmIntOnly, "HARM");
+    }
+
+    if (! freqShiftActive)
+    {
+        setLabelOnly (cachedWindowTextFull, cachedWindowTextShort, cachedWindowIntOnly, "WINDOW", "WIN");
+    }
+
     return oldFreqFull      != cachedFreqTextFull
         || oldFreqShort     != cachedFreqTextShort
         || oldModFull       != cachedModTextFull

@@ -36,8 +36,8 @@ The value column reflects the current context:
 - `FREQ`: hertz, note name, or sync division
 - `MOD`: frequency multiplier
 - `COMB`: hertz
-- `FEEDBACK`: percent
-- `JITTER`: percent
+- `FBK`: percent
+- `JIT`: percent
 - `ENGINE`: percent blend
 - `WIN`: Hilbert window size for the frequency-shift path
 - `STYLE`: MONO / STEREO / WIDE / DUAL
@@ -47,7 +47,7 @@ The value column reflects the current context:
 - `INPUT` / `OUTPUT`: dB
 - `TILT`: dB
 - `PAN`: stereo position
-- `LIMIT`: threshold in dB
+- `LIM`: threshold in dB
 
 ## Parameters
 
@@ -98,7 +98,7 @@ Resonant frequency of the feedback delay line. Higher values shorten the feedbac
 
 At 0 Hz the comb control is visually at its floor; when feedback is active, the internal feedback delay uses a safe 0.1 Hz effective minimum.
 
-### FEEDBACK (0-100%)
+### FBK (0-100%)
 
 Feeds the wet output back into the Hilbert input. This creates barberpole-like stacks in frequency-shift mode and increasingly metallic recirculation in AM mode.
 
@@ -109,12 +109,12 @@ The feedback path includes:
 - feedback low-pass conditioning
 - safety limiting
 
-### JITTER (0-100%)
+### JIT (0-100%)
 
 Internal motion for the frequency shifter and feedback network. It uses the same time-equivalent jitter model as the other TR modulation plugins:
 - `FREQ` is modulated from its oscillator period, with an effective Hz floor so low rates still move perceptually
 - `COMB` is modulated as feedback delay time
-- `FEEDBACK` is modulated multiplicatively, without generating feedback from silence
+- `FBK` is modulated multiplicatively, without generating feedback from silence
 
 At 0% the jitter path is bypassed. In stereo modes, deterministic lanes keep the movement repeatable while avoiding identical left/right modulation. In SYNC + RETRIG mode, the oscillator integrates the jittered frequency sample-accurately instead of applying a small phase-only offset.
 
@@ -146,7 +146,7 @@ Controls harmonic density of the modulator.
 
 - 0% = pure sine modulator
 - higher values = progressively denser additive harmonic series
-- internal cap = 24 partials maximum
+- internal cap = 16 partials total, including the fundamental
 - effective count is also limited dynamically by Nyquist
 
 This affects both AM and frequency-shift behavior. At low values the modulation is cleaner and more fundamental-driven; at high values it becomes richer and more spectrally dense.
@@ -253,7 +253,7 @@ Two optional modulation targets:
 
 Each target uses its own amount and speed values and is smoothed/interpolated for organic motion.
 
-### LIMIT
+### LIM
 
 Limiter threshold:
 - range: -36 to 0 dB
@@ -279,7 +279,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Real path: matched to the selected maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
 - Sidechain carrier: optional external audio carrier with time/tone controls and Hilbert quadrature for frequency-shift operation
-- Harmonic cap: 24 partials max, dynamically limited by Nyquist
+- Harmonic cap: 16 partials total, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
 - Feedback: comb-tuned delay line with DC blocking and low-pass conditioning
@@ -311,11 +311,11 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 ### v1.4
 
 - Replaced `SHAPE` with `HARM`
-- Harmonic modulator now starts from pure sine and adds density continuously up to 24 partials
+- Harmonic modulator now starts from pure sine and adds density continuously up to 16 total partials
 - Added RMS-normalized harmonic oscillator behavior
 - Added TILT EQ
 - Added CHAOS F / CHAOS D
-- Added JITTER for deterministic internal movement of frequency, comb, and feedback
+- Added JIT for deterministic internal movement of frequency, comb, and feedback
 - Added AM -> RM -> FREQ SHIFT engine mapping
 - Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency

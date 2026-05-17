@@ -564,6 +564,16 @@ private:
 	std::atomic<float>* midiParam    = nullptr;
 	std::atomic<float>* alignParam   = nullptr;
 	std::atomic<float>* pdcParam     = nullptr;
+	int lastReportedLatency_ = -1;
+
+	void updateReportedLatency (int newLatencySamples)
+	{
+		if (newLatencySamples != lastReportedLatency_)
+		{
+			setLatencySamples (newLatencySamples);
+			lastReportedLatency_ = newLatencySamples;
+		}
+	}
 	std::atomic<float>* sidechainParam = nullptr;
 	std::atomic<float>* sidechainTimeParam = nullptr;
 	std::atomic<float>* sidechainToneParam = nullptr;
@@ -1353,50 +1363,6 @@ private:
 	float limAtt1_  = 0.0f;
 	float limRel1_  = 0.0f;
 	float limRel2_  = 0.0f;
-
-	inline void applyLimiter (float* leftData, float* rightData, int numSamples,
-	                         float thresholdGain) noexcept
-	{
-		for (int i = 0; i < numSamples; ++i)
-		{
-			const float peakL = std::abs (leftData[i]);
-			const float peakR = std::abs (rightData[i]);
-
-			// Stage 1 — leveler (2 ms attack, 10 ms release)
-			for (int ch = 0; ch < 2; ++ch)
-			{
-				const float p = (ch == 0) ? peakL : peakR;
-				if (p > limEnv1_[ch])
-					limEnv1_[ch] = limAtt1_ * limEnv1_[ch] + (1.0f - limAtt1_) * p;
-				else
-					limEnv1_[ch] = limRel1_ * limEnv1_[ch] + (1.0f - limRel1_) * p;
-				if (limEnv1_[ch] < kLimFloor) limEnv1_[ch] = kLimFloor;
-			}
-
-			// Stage 2 — brickwall (instant attack, 100 ms release)
-			for (int ch = 0; ch < 2; ++ch)
-			{
-				const float p = (ch == 0) ? peakL : peakR;
-				if (p > limEnv2_[ch])
-					limEnv2_[ch] = p;
-				else
-					limEnv2_[ch] = limRel2_ * limEnv2_[ch] + (1.0f - limRel2_) * p;
-				if (limEnv2_[ch] < kLimFloor) limEnv2_[ch] = kLimFloor;
-			}
-
-			// Stereo-linked gain reduction
-			float gr = 1.0f;
-			const float maxEnv1 = juce::jmax (limEnv1_[0], limEnv1_[1]);
-			const float maxEnv2 = juce::jmax (limEnv2_[0], limEnv2_[1]);
-			if (maxEnv1 > thresholdGain)
-				gr = juce::jmin (gr, thresholdGain / maxEnv1);
-			if (maxEnv2 > thresholdGain)
-				gr = juce::jmin (gr, thresholdGain / maxEnv2);
-
-			leftData[i]  *= gr;
-			rightData[i] *= gr;
-		}
-	}
 
 	inline void applyLimiterSample (float& sampleL, float& sampleR, float thresholdGain) noexcept
 	{

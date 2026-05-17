@@ -455,6 +455,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	previousMaxHilbertWindow_ = activeMaxHilbertWindow_;
 	hilbertWindowCrossfadeRemaining_ = 0;
 	hilbertWindowCrossfadeTotal_ = 0;
+	lastReportedLatency_ = -1;
 	for (auto& state : freqShiftHilbertIir_)
 		state.reset();
 	oscPhase = 0.0;
@@ -522,7 +523,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
 	// Report latency if PDC enabled
 	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
-	setLatencySamples (pdcEnabled ? kHilbertMaxDelay : 0);
+	updateReportedLatency (pdcEnabled ? getHilbertDelayForWindow (activeMaxHilbertWindow_) : 0);
 
 	// Reset wet filter state
 	wetFilterState_[0].reset();
@@ -928,7 +929,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainCarrierSmoothCoeff = std::exp (-juce::MathConstants<float>::twoPi
 		* sidechainCarrierSmoothHz / (float) currentSampleRate);
 
-	setLatencySamples (pdcEnabled ? requestedMaxDelay : 0);
+	updateReportedLatency (pdcEnabled ? requestedMaxDelay : 0);
 
 	if (targetHilbertWindow != targetHilbertWindow_
 		|| requestedMaxHilbertWindow != targetMaxHilbertWindow_)

@@ -36,8 +36,26 @@ static juce::String formatGainFaderDb (float dB)
     if (isGainFaderFloor (dB))
         return "-INF dB";
     if (std::abs (dB) < 0.05f)
-        return "0 dB";
+        return "0.0 dB";
     return juce::String (dB, 1) + " dB";
+}
+
+static juce::String formatGainFaderDbCompact (float dB)
+{
+    if (isGainFaderFloor (dB))
+        return "-INFdB";
+    if (std::abs (dB) < 0.05f)
+        return "0.0dB";
+    return juce::String (dB, 1) + "dB";
+}
+
+static juce::String formatFilterPromptFrequency (float hz)
+{
+    if (hz >= 1000.0f)
+        return juce::String (hz, 2);
+    if (hz >= 100.0f)
+        return juce::String (hz, 1);
+    return juce::String (hz, 2);
 }
 
 // ── Mod slider ↔ multiplier conversion ──
@@ -469,12 +487,12 @@ void FREQTRAudioProcessorEditor::FilterBarComponent::updateTooltipForTarget (Dra
     if (target == HP)
     {
         const int hz = juce::roundToInt (hpFreq_);
-        setTooltip ("HP: " + juce::String (hz) + " Hz");
+        setTooltip ("HP " + juce::String (hz) + " Hz");
     }
     else if (target == LP)
     {
         const int hz = juce::roundToInt (lpFreq_);
-        setTooltip ("LP: " + juce::String (hz) + " Hz");
+        setTooltip ("LP " + juce::String (hz) + " Hz");
     }
     else
     {
@@ -667,7 +685,7 @@ void FREQTRAudioProcessorEditor::DualMixBarComponent::updateTooltipForTarget (Dr
     const float level = (target == DRY) ? dryLevel_ : wetLevel_;
     const float dB = (level <= 0.0001f) ? -100.0f : 20.0f * std::log10 (level);
     const juce::String label = (target == DRY) ? "DRY" : "WET";
-    setTooltip (dB <= -100.0f ? (label + ": -INF dB") : (label + ": " + juce::String (dB, 1) + " dB"));
+    setTooltip (dB <= -100.0f ? (label + " -INF dB") : (label + " " + juce::String (dB, 1) + " dB"));
 }
 
 void FREQTRAudioProcessorEditor::DualMixBarComponent::updateFromProcessor()
@@ -1579,7 +1597,7 @@ juce::String FREQTRAudioProcessorEditor::getModTextShort() const
 juce::String FREQTRAudioProcessorEditor::getFeedbackText() const
 {
     const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, feedbackSlider.getValue()) * 100.0);
-    return juce::String (pct) + "% FEEDBACK";
+    return juce::String (pct) + "% FBK";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackTextShort() const
@@ -1591,7 +1609,7 @@ juce::String FREQTRAudioProcessorEditor::getFeedbackTextShort() const
 juce::String FREQTRAudioProcessorEditor::getJitterText() const
 {
     const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, jitterSlider.getValue()) * 100.0);
-    return juce::String (pct) + "% JITTER";
+    return juce::String (pct) + "% JIT";
 }
 
 juce::String FREQTRAudioProcessorEditor::getJitterTextShort() const
@@ -1815,7 +1833,7 @@ juce::String FREQTRAudioProcessorEditor::getMixText() const
         const float dB = (level <= 0.0001f) ? -100.0f : 20.0f * std::log10 (level);
         const juce::String suffix = isDry ? " DRY" : " WET";
         if (dB <= -100.0f) return "-INF dB" + suffix;
-        if (std::abs (dB) < 0.05f) return "0 dB" + suffix;
+        if (std::abs (dB) < 0.05f) return "0.0 dB" + suffix;
         return juce::String (dB, 1) + " dB" + suffix;
     }
     const int pct = (int) std::lround (mixSlider.getValue() * 100.0);
@@ -1831,7 +1849,7 @@ juce::String FREQTRAudioProcessorEditor::getMixTextShort() const
         const float dB = (level <= 0.0001f) ? -100.0f : 20.0f * std::log10 (level);
         const juce::String suffix = isDry ? " DRY" : " WET";
         if (dB <= -100.0f) return "-INF" + suffix;
-        if (std::abs (dB) < 0.05f) return "0dB" + suffix;
+        if (std::abs (dB) < 0.05f) return "0.0dB" + suffix;
         return juce::String (dB, 1) + "dB" + suffix;
     }
     const int pct = (int) std::lround (mixSlider.getValue() * 100.0);
@@ -1866,7 +1884,7 @@ juce::String FREQTRAudioProcessorEditor::getTiltText() const
 {
     const float db = (float) tiltSlider.getValue();
     if (std::abs (db) < 0.05f)
-        return "0 dB TILT";
+        return "0.0 dB TILT";
     return juce::String (db, 1) + " dB TILT";
 }
 
@@ -1874,7 +1892,7 @@ juce::String FREQTRAudioProcessorEditor::getTiltTextShort() const
 {
     const float db = (float) tiltSlider.getValue();
     if (std::abs (db) < 0.05f)
-        return "0 dB TLT";
+        return "0.0 dB TLT";
     return juce::String (db, 1) + " dB TLT";
 }
 
@@ -1958,20 +1976,14 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     cachedInputTextShort = getInputTextShort();
     {
         const float inDb = (float) inputSlider.getValue();
-        if (isGainFaderFloor (inDb))
-            cachedInputIntOnly = "-INF";
-        else
-            cachedInputIntOnly = juce::String ((int) inputSlider.getValue()) + "dB";
+        cachedInputIntOnly = formatGainFaderDbCompact (inDb);
     }
 
     cachedOutputTextFull = getOutputText();
     cachedOutputTextShort = getOutputTextShort();
     {
         const float outDb = (float) outputSlider.getValue();
-        if (isGainFaderFloor (outDb))
-            cachedOutputIntOnly = "-INF";
-        else
-            cachedOutputIntOnly = juce::String ((int) outputSlider.getValue()) + "dB";
+        cachedOutputIntOnly = formatGainFaderDbCompact (outDb);
     }
 
     cachedTiltTextFull = getTiltText();
@@ -1979,9 +1991,9 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     {
         const float tDb = (float) tiltSlider.getValue();
         if (std::abs (tDb) < 0.05f)
-            cachedTiltIntOnly = "0dB";
+            cachedTiltIntOnly = "0.0dB";
         else
-            cachedTiltIntOnly = juce::String ((int) tDb) + "dB";
+            cachedTiltIntOnly = juce::String (tDb, 1) + "dB";
     }
 
     if (mixModeCombo.getSelectedId() == 2)
@@ -1991,8 +2003,8 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         const float dB = (level <= 0.0001f) ? -100.0f : 20.0f * std::log10 (level);
         const juce::String suffix = isDry ? " DRY" : " WET";
         if (dB <= -100.0f) cachedMixIntOnly = "-INF" + suffix;
-        else if (std::abs (dB) < 0.05f) cachedMixIntOnly = "0dB" + suffix;
-        else cachedMixIntOnly = juce::String ((int) dB) + "dB" + suffix;
+        else if (std::abs (dB) < 0.05f) cachedMixIntOnly = "0.0dB" + suffix;
+        else cachedMixIntOnly = juce::String (dB, 1) + "dB" + suffix;
     }
     else
     {
@@ -2031,13 +2043,13 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         const auto limText = juce::String (std::abs (limDb) < 0.05f ? 0.0f : limDb, 1);
         if (limDb >= -0.05f)
         {
-            cachedLimThresholdTextFull  = "0.0 dB LIMIT";
+            cachedLimThresholdTextFull  = "0.0 dB LIM";
             cachedLimThresholdTextShort = "0.0 dB LIM";
             cachedLimThresholdIntOnly   = "0.0dB";
         }
         else
         {
-            cachedLimThresholdTextFull  = limText + " dB LIMIT";
+            cachedLimThresholdTextFull  = limText + " dB LIM";
             cachedLimThresholdTextShort = limText + " dB LIM";
             cachedLimThresholdIntOnly   = limText + "dB";
         }
@@ -2489,6 +2501,9 @@ static void layoutInfoPopupContent (juce::AlertWindow& aw)
 
 void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s)
 {
+    if (&s == &windowSlider || &s == &styleSlider)
+        return;
+
     lnf.setScheme (activeScheme);
     const auto scheme = activeScheme;
 
@@ -2510,11 +2525,9 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     }
     else if (&s == &modSlider)       { suffix = " X MOD";      suffixShort = " X"; }
     else if (&s == &feedbackSlider)  { suffix = " % FBK";      suffixShort = " % FBK"; }
-    else if (&s == &jitterSlider)    { suffix = " % JITTER";   suffixShort = " % JIT"; }
+    else if (&s == &jitterSlider)    { suffix = " % JIT";      suffixShort = " % JIT"; }
     else if (&s == &combSlider)      { suffix = " HZ";         suffixShort = " HZ"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " %"; }
-    else if (&s == &windowSlider)    { suffix = " WIN";        suffixShort = " WIN"; }
-    else if (&s == &styleSlider)     { suffix = " STYLE";      suffixShort = " STYLE"; }
     else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " %"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
     else if (&s == &mixSlider)       { suffix = " % MIX";      suffixShort = " % MIX"; }
@@ -2534,15 +2547,13 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     if (&s == &modSlider)
         currentDisplay = juce::String (modSliderToMultiplier (s.getValue()), 2);
     else if (&s == &engineSlider)
-        currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
-    else if (&s == &windowSlider)
-        currentDisplay = juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (s.getValue())));
+        currentDisplay = juce::String (s.getValue() * 100.0, 2);
     else if (&s == &feedbackSlider)
-        currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
+        currentDisplay = juce::String (s.getValue() * 100.0, 2);
     else if (&s == &jitterSlider)
-        currentDisplay = juce::String (juce::jlimit (0.0, 100.0, s.getValue() * 100.0), 1);
+        currentDisplay = juce::String (juce::jlimit (0.0, 100.0, s.getValue() * 100.0), 2);
     else if (&s == &mixSlider)
-        currentDisplay = juce::String ((int) std::lround (s.getValue() * 100.0));
+        currentDisplay = juce::String (s.getValue() * 100.0, 2);
     else if (&s == &panSlider)
         currentDisplay = juce::String (juce::jlimit (0.0, 100.0, s.getValue() * 100.0), 0);
     else
@@ -2601,21 +2612,17 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         else if (&s == &modSlider)
             worstCaseText = "4.00";
         else if (&s == &feedbackSlider)
-            worstCaseText = "100";
+            worstCaseText = "100.00";
         else if (&s == &jitterSlider)
-            worstCaseText = "100.0";
+            worstCaseText = "100.00";
         else if (&s == &engineSlider)
-            worstCaseText = "100";
-        else if (&s == &windowSlider)
-            worstCaseText = "2048";
-        else if (&s == &styleSlider)
-            worstCaseText = "1";
+            worstCaseText = "100.00";
         else if (&s == &harmSlider)
-            worstCaseText = "100.0";
+            worstCaseText = "100.00";
         else if (&s == &polaritySlider)
             worstCaseText = "-1.00";
         else if (&s == &mixSlider)
-            worstCaseText = "100";
+            worstCaseText = "100.00";
         else if (&s == &panSlider)
             worstCaseText = "100";
         else if (&s == &inputSlider)
@@ -2729,43 +2736,29 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 1;
-            maxLen = 5;
+            maxDecs = 2;
+            maxLen = 6;
         }
         else if (&s == &jitterSlider)
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 1;
-            maxLen = 5;
+            maxDecs = 2;
+            maxLen = 6;
         }
         else if (&s == &engineSlider)
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 1;
-            maxLen = 5;
-        }
-        else if (&s == &windowSlider)
-        {
-            minVal = FREQTRAudioProcessor::kHilbertWindowMin;
-            maxVal = FREQTRAudioProcessor::kHilbertWindowMax;
-            maxDecs = 0;
-            maxLen = 4;
-        }
-        else if (&s == &styleSlider)
-        {
-            minVal = 0.0;
-            maxVal = 1.0;
-            maxDecs = 0;
-            maxLen = 1;
+            maxDecs = 2;
+            maxLen = 6;
         }
         else if (&s == &harmSlider)
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 1;
-            maxLen = 5;
+            maxDecs = 2;
+            maxLen = 6;
         }
         else if (&s == &polaritySlider)
         {
@@ -2778,8 +2771,8 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         {
             minVal = 0.0;
             maxVal = 100.0;
-            maxDecs = 1;
-            maxLen = 5;
+            maxDecs = 2;
+            maxLen = 6;
         }
         else if (&s == &inputSlider)
         {
@@ -2979,11 +2972,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             if (safeThis != nullptr && sliderPtr == &safeThis->freqSlider
                 && ! safeThis->syncButton.getToggleState())
             {
-                clamped = roundToDecimals (clamped, 1);
-            }
-            else if (safeThis != nullptr && sliderPtr == &safeThis->windowSlider)
-            {
-                clamped = (double) FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (clamped));
+                clamped = roundToDecimals (clamped, 3);
             }
 
             sliderPtr->setValue (clamped, juce::sendNotificationSync);
@@ -3066,12 +3055,12 @@ void FREQTRAudioProcessorEditor::openFilterPrompt()
     };
 
     // HP section
-    aw->addTextEditor ("hpFreq", juce::String (juce::roundToInt (hpFreq)), juce::String());
+    aw->addTextEditor ("hpFreq", formatFilterPromptFrequency (hpFreq), juce::String());
     auto* hpBar = new PromptBar (scheme, freqToNorm (hpFreq), freqToNorm (FREQTRAudioProcessor::kFilterHpFreqDefault));
     aw->addAndMakeVisible (hpBar);
 
     // LP section
-    aw->addTextEditor ("lpFreq", juce::String (juce::roundToInt (lpFreq)), juce::String());
+    aw->addTextEditor ("lpFreq", formatFilterPromptFrequency (lpFreq), juce::String());
     auto* lpBar = new PromptBar (scheme, freqToNorm (lpFreq), freqToNorm (FREQTRAudioProcessor::kFilterLpFreqDefault));
     aw->addAndMakeVisible (lpBar);
 
@@ -3126,8 +3115,8 @@ void FREQTRAudioProcessorEditor::openFilterPrompt()
 
         auto* hpTe = aw->getTextEditor ("hpFreq");
         auto* lpTe = aw->getTextEditor ("lpFreq");
-        float hpF = hpTe ? juce::jlimit (20.0f, 20000.0f, (float) hpTe->getText().getIntValue()) : 20.0f;
-        float lpF = lpTe ? juce::jlimit (20.0f, 20000.0f, (float) lpTe->getText().getIntValue()) : 20000.0f;
+        float hpF = hpTe ? juce::jlimit (20.0f, 20000.0f, (float) hpTe->getText().getFloatValue()) : 20.0f;
+        float lpF = lpTe ? juce::jlimit (20.0f, 20000.0f, (float) lpTe->getText().getFloatValue()) : 20000.0f;
         // Clamp so HP never exceeds LP
         if (hpF > lpF) { const float mid = (hpF + lpF) * 0.5f; hpF = mid; lpF = mid; }
         if (hpTe) setP (FREQTRAudioProcessor::kParamFilterHpFreq, hpF);
@@ -3203,7 +3192,7 @@ void FREQTRAudioProcessorEditor::openFilterPrompt()
 
         if (auto* te = aw->getTextEditor (editorId))
         {
-            te->setText (juce::String (juce::roundToInt (normToFreq (v01))), juce::sendNotification);
+            te->setText (formatFilterPromptFrequency (normToFreq (v01)), juce::sendNotification);
             te->selectAll();
         }
         *syncing = false;
@@ -3217,14 +3206,14 @@ void FREQTRAudioProcessorEditor::openFilterPrompt()
     {
         if (*syncing || te == nullptr || bar == nullptr) return;
         *syncing = true;
-        float freq = juce::jlimit (20.0f, 20000.0f, (float) te->getText().getIntValue());
+        float freq = juce::jlimit (20.0f, 20000.0f, (float) te->getText().getFloatValue());
         auto* otherTe = aw->getTextEditor (isHp ? "lpFreq" : "hpFreq");
-        const float otherFreq = otherTe ? juce::jlimit (20.0f, 20000.0f, (float) otherTe->getText().getIntValue()) : (isHp ? 20000.0f : 20.0f);
+        const float otherFreq = otherTe ? juce::jlimit (20.0f, 20000.0f, (float) otherTe->getText().getFloatValue()) : (isHp ? 20000.0f : 20.0f);
         if (isHp)
             freq = juce::jmin (freq, otherFreq);
         else
             freq = juce::jmax (freq, otherFreq);
-        te->setText (juce::String (juce::roundToInt (freq)), juce::dontSendNotification);
+        te->setText (formatFilterPromptFrequency (freq), juce::dontSendNotification);
         bar->value01 = freqToNorm (freq);
         bar->repaint();
         *syncing = false;
@@ -5878,8 +5867,8 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "1/64. FREQ",
         "X4.00 MOD",
         "5.00 kHz COMB",
-        "100% FEEDBACK",
-        "100% JITTER",
+        "100% FBK",
+        "100% JIT",
         "FREQ SHIFT ENGINE",
         "100% AM|RM ENGINE",
         "100% RM|FS ENGINE",
@@ -5888,8 +5877,9 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "100% HARM",
         "-1.00 POLARITY",
         "100% MIX",
-        "-100.0 dB INPUT",
-        "+24.0 dB OUTPUT"
+        "-INF dB INPUT",
+        "+24.0 dB OUTPUT",
+        "-36.0 dB LIM"
     };
 
     int maxLegW = 0;

@@ -30,7 +30,7 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 - Collapsible I/O section: click the top triangle bar to switch between the main modulation view and the I/O/filter/routing section.
 - Filter bar: opens the HP/LP prompt.
 - Gear icon: opens the info popup and graphics settings.
-- Resize: bottom-right corner; size persists across sessions.
+- Resize: bottom-right corner; editor width persists across sessions.
 
 The value column reflects the current context:
 - `FREQ`: hertz, note name, or sync division
@@ -293,11 +293,10 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - note frequency follows standard `440 * 2^((note - 69) / 12)`
 - priority order: MIDI > SYNC > manual FREQ
 
-### State / Compatibility
+### State
 
 - Parameters and UI state persist through APVTS
-- The current implementation uses `HARM` instead of the legacy `SHAPE` control
-- Older sessions or automation that depended on `SHAPE` will not map that control 1:1
+- `HARM` controls the additive harmonic density of the internal modulator
 
 ### Build
 

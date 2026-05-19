@@ -642,9 +642,9 @@ private:
     static constexpr double kDefaultPolarity = (double) FREQTRAudioProcessor::kPolarityDefault;
 
     static constexpr int kMinW = 360;
-    static constexpr int kMinH = 740;
-    static constexpr int kMaxW = 800;
-    static constexpr int kMaxH = 820;
+    static constexpr int kMinH = 752;
+    static constexpr int kMaxW = kMinW * 2;
+    static constexpr int kMaxH = kMinH;
 
     static constexpr int kLayoutVerticalBiasPx = 10;
 
@@ -653,7 +653,6 @@ private:
     int lastPersistedEditorW = -1;
     int lastPersistedEditorH = -1;
     std::atomic<uint32_t> lastUserInteractionMs { 0 };
-    std::atomic<double> dragStartValue { 0.0 };
     static constexpr uint32_t kUserInteractionPersistWindowMs = 5000;
     bool crtEnabled = false;
     bool useCustomPalette = false;

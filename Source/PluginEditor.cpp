@@ -58,6 +58,15 @@ static juce::String formatFilterPromptFrequency (float hz)
     return juce::String (hz, 2);
 }
 
+static juce::String formatInlineFrequency (float hz)
+{
+    if (hz < 0.05f)
+        return "0Hz";
+    if (hz >= 1000.0f)
+        return juce::String (hz / 1000.0f, 2) + "kHz";
+    return juce::String (hz, 2) + "Hz";
+}
+
 // ── Mod slider ↔ multiplier conversion ──
 static constexpr double kModCenter  = 0.5;
 static constexpr double kModScale   = 3.0;
@@ -1551,11 +1560,7 @@ juce::String FREQTRAudioProcessorEditor::getFreqText() const
     }
 
     const float hz = (float) freqSlider.getValue();
-    if (hz < 0.05f)
-        return "0 Hz FREQ";
-    if (hz >= 1000.0f)
-        return juce::String (hz / 1000.0f, 2) + " kHz FREQ";
-    return juce::String (hz, 2) + " Hz FREQ";
+    return formatInlineFrequency (hz) + " FREQ";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFreqTextShort() const
@@ -1571,11 +1576,7 @@ juce::String FREQTRAudioProcessorEditor::getFreqTextShort() const
     }
 
     const float hz = (float) freqSlider.getValue();
-    if (hz < 0.05f)
-        return "0 Hz";
-    if (hz >= 1000.0f)
-        return juce::String (hz / 1000.0f, 2) + "kHz";
-    return juce::String (hz, 2) + "Hz";
+    return formatInlineFrequency (hz) + " FRQ";
 }
 
 juce::String FREQTRAudioProcessorEditor::getModText() const
@@ -1621,17 +1622,13 @@ juce::String FREQTRAudioProcessorEditor::getJitterTextShort() const
 juce::String FREQTRAudioProcessorEditor::getCombText() const
 {
     const float hz = (float) combSlider.getValue();
-    if (hz >= 1000.0f)
-        return juce::String (hz / 1000.0f, 2) + " kHz COMB";
-    return juce::String (hz, 2) + " Hz COMB";
+    return formatInlineFrequency (hz) + " COMB";
 }
 
 juce::String FREQTRAudioProcessorEditor::getCombTextShort() const
 {
     const float hz = (float) combSlider.getValue();
-    if (hz >= 1000.0f)
-        return juce::String (hz / 1000.0f, 2) + "kHz CMB";
-    return juce::String (hz, 2) + "Hz CMB";
+    return formatInlineFrequency (hz) + " CMB";
 }
 
 void FREQTRAudioProcessorEditor::updateCombEnabled()
@@ -2015,16 +2012,13 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     else if (syncButton.getToggleState())
         cachedFreqIntOnly = audioProcessor.getFreqSyncName ((int) freqSlider.getValue());
     else
-        cachedFreqIntOnly = juce::String ((int) freqSlider.getValue()) + "Hz";
+        cachedFreqIntOnly = formatInlineFrequency ((float) freqSlider.getValue());
     cachedModIntOnly      = juce::String ((int) modSlider.getValue());
     cachedFeedbackIntOnly = juce::String ((int) std::lround (feedbackSlider.getValue() * 100.0)) + "%";
     cachedJitterIntOnly   = juce::String ((int) std::lround (jitterSlider.getValue() * 100.0)) + "%";
     {
         const float chz = (float) combSlider.getValue();
-        if (chz >= 1000.0f)
-            cachedCombIntOnly = juce::String (chz / 1000.0f, 1) + "kHz";
-        else
-            cachedCombIntOnly = juce::String (chz, 1) + "Hz";
+        cachedCombIntOnly = formatInlineFrequency (chz);
     }
     cachedEngineIntOnly   = juce::String ((int) std::lround (engineSlider.getValue() * 100.0)) + "%";
     cachedWindowIntOnly   = juce::String (FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (windowSlider.getValue())));
@@ -2072,10 +2066,14 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
         setLabelOnly (cachedModTextFull, cachedModTextShort, cachedModIntOnly, "MOD");
     }
 
-    if (sidechainOn || ! freqShiftActive)
+    if (sidechainOn)
     {
         setLabelOnly (cachedHarmTextFull, cachedHarmTextShort, cachedHarmIntOnly, "HARM");
     }
+
+    freqSlider.setTooltip (sidechainOn ? "FREQ inactive" : ("FREQ " + cachedFreqIntOnly));
+    combSlider.setTooltip ("CMB " + cachedCombIntOnly);
+    harmSlider.setTooltip (sidechainOn ? "HARM inactive" : (getHarmTextShort() + " HARM"));
 
     if (! freqShiftActive)
     {
@@ -2546,23 +2544,23 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         }
         else
         {
-            suffix = " HZ FREQ";
-            suffixShort = " HZ";
+            suffix = " Hz";
+            suffixShort = " Hz";
         }
     }
-    else if (&s == &modSlider)       { suffix = " X MOD";      suffixShort = " X"; }
+    else if (&s == &modSlider)       { suffix = " X MOD";      suffixShort = " X MOD"; }
     else if (&s == &feedbackSlider)  { suffix = " % FBK";      suffixShort = " % FBK"; }
     else if (&s == &jitterSlider)    { suffix = " % JIT";      suffixShort = " % JIT"; }
-    else if (&s == &combSlider)      { suffix = " HZ";         suffixShort = " HZ"; }
-    else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " %"; }
-    else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " %"; }
+    else if (&s == &combSlider)      { suffix = " Hz";         suffixShort = " Hz"; }
+    else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " % ENG"; }
+    else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " % HARM"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
     else if (&s == &mixSlider)       { suffix = " % MIX";      suffixShort = " % MIX"; }
-    else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " %"; }
-    else if (&s == &inputSlider)     { suffix = " DB INPUT";   suffixShort = " DB IN"; }
-    else if (&s == &outputSlider)    { suffix = " DB OUTPUT";  suffixShort = " DB OUT"; }
-    else if (&s == &tiltSlider)      { suffix = " DB TILT";    suffixShort = " DB TILT"; }
-    else if (&s == &limThresholdSlider) { suffix = " DB LIM";  suffixShort = " DB LIM"; }
+    else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " % PAN"; }
+    else if (&s == &inputSlider)     { suffix = " dB INPUT";   suffixShort = " dB IN"; }
+    else if (&s == &outputSlider)    { suffix = " dB OUTPUT";  suffixShort = " dB OUT"; }
+    else if (&s == &tiltSlider)      { suffix = " dB TILT";    suffixShort = " dB TILT"; }
+    else if (&s == &limThresholdSlider) { suffix = " dB LIM";  suffixShort = " dB LIM"; }
     const juce::String suffixText = suffix.trimStart();
     const juce::String suffixTextShort = suffixShort.trimStart();
     const bool isPercentPrompt = (&s == &engineSlider || &s == &harmSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &jitterSlider || &s == &panSlider);
@@ -5624,12 +5622,6 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
             return;
         }
     }
-
-    // Left-click on value area → remember value for drag
-    if (auto* slider = getSliderForValueAreaPoint (pt))
-    {
-        dragStartValue.store (slider->getValue(), std::memory_order_relaxed);
-    }
 }
 
 void FREQTRAudioProcessorEditor::mouseDoubleClick (const juce::MouseEvent& e)
@@ -5645,15 +5637,8 @@ void FREQTRAudioProcessorEditor::mouseDoubleClick (const juce::MouseEvent& e)
 
 void FREQTRAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e)
 {
+    juce::ignoreUnused (e);
     lastUserInteractionMs.store (juce::Time::getMillisecondCounter(), std::memory_order_relaxed);
-
-    if (auto* slider = getSliderForValueAreaPoint (e.getMouseDownPosition()))
-    {
-        const double delta = (double) -e.getDistanceFromDragStartY() * 0.002;
-        const double range = slider->getMaximum() - slider->getMinimum();
-        const double baseValue = dragStartValue.load (std::memory_order_relaxed);
-        slider->setValue (baseValue + delta * range, juce::sendNotificationSync);
-    }
 }
 
 //========================== Layout builders ==========================
@@ -5890,10 +5875,10 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
 
     // Measure worst-case legend widths
     constexpr const char* legends[] = {
-        "5000.00 Hz FREQ", "5.00 kHz FREQ",
+        "5000.00Hz FREQ", "5.00kHz FREQ",
         "1/64. FREQ",
         "X4.00 MOD",
-        "5.00 kHz COMB",
+        "5.00kHz COMB",
         "100% FBK",
         "100% JIT",
         "FREQ SHIFT ENGINE",
@@ -5954,7 +5939,7 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getSyncLabelArea() const
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getMidiLabelArea() const
 {
-    return makeToggleLabelArea (midiButton, getWidth() - kToggleLegendCollisionPadPx, "MIDI", "MD");
+    return makeToggleLabelArea (midiButton, getWidth() - kToggleLegendCollisionPadPx, "MIDI", "MIDI");
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getAlignLabelArea() const
@@ -6286,11 +6271,11 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
         // Mode In / Mode Out / Sum Bus / Limiter Mode labels above combos
         if (modeInCombo.isVisible())
         {
-            const auto font = juce::Font (juce::FontOptions (15.0f).withStyle ("Bold"));
+            const auto font = juce::Font (juce::FontOptions (17.0f).withStyle ("Bold"));
             g.setFont (font);
             auto drawComboLabel = [&] (const juce::ComboBox& combo, const juce::String& full, const juce::String& shortTxt)
             {
-                const auto area = combo.getBounds().withHeight (18).translated (0, -19);
+                const auto area = combo.getBounds().withHeight (20).translated (0, -21);
                 const float comboW = (float) combo.getWidth();
                 juce::GlyphArrangement ga;
                 ga.addLineOfText (font, full, 0.0f, 0.0f);
@@ -6395,28 +6380,29 @@ void FREQTRAudioProcessorEditor::resized()
 
         // Mode In / Mode Out / Sum Bus / Limiter Mode — 4 combos on row 7
         {
-            const int comboGap = 4;
+            const int comboGapX = 4;
+            const int comboGapY = 10;
             const int totalW = horizontalLayout.barW + horizontalLayout.valuePad + horizontalLayout.valueW;
-            const int comboW = (totalW - comboGap * 3) / 4;
+            const int comboW = (totalW - comboGapX * 3) / 4;
             const int comboH = juce::jlimit (38, 48, verticalLayout.barH + 14);
             const int labelOffset = 19;
-            const int comboBlockH = labelOffset + comboH + comboGap + labelOffset + comboH;
+            const int comboBlockH = labelOffset + comboH + comboGapY + labelOffset + comboH;
             const int blockTopLimit = limThresholdSlider.getBottom() + verticalLayout.gapY;
             const int blockBottomLimit = verticalLayout.chaosRowY - verticalLayout.gapY;
             const int availableBlockH = juce::jmax (comboBlockH, blockBottomLimit - blockTopLimit);
             const int visualTop = blockTopLimit + juce::jmax (0, (availableBlockH - comboBlockH) / 2);
             const int modeY = visualTop + labelOffset;
             modeInCombo.setBounds  (horizontalLayout.leftX,                           modeY, comboW, comboH);
-            modeOutCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap),      modeY, comboW, comboH);
-            sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGap) * 2,  modeY, comboW, comboH);
-            limModeCombo.setBounds (horizontalLayout.leftX + (comboW + comboGap) * 3,  modeY, comboW, comboH);
+            modeOutCombo.setBounds (horizontalLayout.leftX + (comboW + comboGapX),      modeY, comboW, comboH);
+            sumBusCombo.setBounds  (horizontalLayout.leftX + (comboW + comboGapX) * 2,  modeY, comboW, comboH);
+            limModeCombo.setBounds (horizontalLayout.leftX + (comboW + comboGapX) * 3,  modeY, comboW, comboH);
 
-            const int invY = modeY + comboH + comboGap + labelOffset;
-            const int comboW2 = (totalW - comboGap * 3) / 4;
+            const int invY = modeY + comboH + comboGapY + labelOffset;
+            const int comboW2 = (totalW - comboGapX * 3) / 4;
             mixModeCombo.setBounds   (horizontalLayout.leftX,                             invY, comboW2, comboH);
-            filterPosCombo.setBounds (horizontalLayout.leftX + (comboW2 + comboGap),       invY, comboW2, comboH);
-            invPolCombo.setBounds    (horizontalLayout.leftX + (comboW2 + comboGap) * 2,   invY, comboW2, comboH);
-            invStrCombo.setBounds    (horizontalLayout.leftX + (comboW2 + comboGap) * 3,   invY, comboW2, comboH);
+            filterPosCombo.setBounds (horizontalLayout.leftX + (comboW2 + comboGapX),       invY, comboW2, comboH);
+            invPolCombo.setBounds    (horizontalLayout.leftX + (comboW2 + comboGapX) * 2,   invY, comboW2, comboH);
+            invStrCombo.setBounds    (horizontalLayout.leftX + (comboW2 + comboGapX) * 3,   invY, comboW2, comboH);
         }
 
         // DualMixBar at same position as mixSlider

@@ -286,7 +286,7 @@ FREQTRAudioProcessor::FREQTRAudioProcessor()
 	uiColorParams[1] = apvts.getRawParameterValue (kParamUiColor1);
 
 	const int w = loadIntParamOrDefault (uiWidthParam, 360);
-	const int h = loadIntParamOrDefault (uiHeightParam, 480);
+	const int h = loadIntParamOrDefault (uiHeightParam, 752);
 	uiEditorWidth.store (w, std::memory_order_relaxed);
 	uiEditorHeight.store (h, std::memory_order_relaxed);
 
@@ -2161,8 +2161,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 		kFilterPosDefault));
 
 	// UI state (hidden from automation)
-	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 1600, 360));
-	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiHeight, "UI Height", 240, 1200, 480));
+	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiWidth, "UI Width", 360, 720, 360));
+	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiHeight, "UI Height", 240, 1200, 752));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamUiPalette, "UI Palette", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamUiCrt, "UI CRT", false));
 	params.push_back (std::make_unique<juce::AudioParameterInt> (kParamUiColor0, "UI Color 0", 0, 0xFFFFFF, 0x00FF00));
@@ -2176,8 +2176,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 
 void FREQTRAudioProcessor::setUiEditorSize (int width, int height)
 {
-	const int w = juce::jlimit (360, 1600, width);
-	const int h = juce::jlimit (240, 1200, height);
+	const int w = juce::jlimit (360, 720, width);
+	const int h = juce::jlimit (752, 752, height);
 	uiEditorWidth.store (w, std::memory_order_relaxed);
 	uiEditorHeight.store (h, std::memory_order_relaxed);
 	apvts.state.setProperty (UiStateKeys::editorWidth, w, nullptr);
@@ -2190,19 +2190,15 @@ void FREQTRAudioProcessor::setUiEditorSize (int width, int height)
 int FREQTRAudioProcessor::getUiEditorWidth() const noexcept
 {
 	const auto fromState = apvts.state.getProperty (UiStateKeys::editorWidth);
-	if (! fromState.isVoid()) return (int) fromState;
+	if (! fromState.isVoid()) return juce::jlimit (360, 720, (int) fromState);
 	if (uiWidthParam != nullptr)
-		return (int) std::lround (uiWidthParam->load (std::memory_order_relaxed));
-	return uiEditorWidth.load (std::memory_order_relaxed);
+		return juce::jlimit (360, 720, (int) std::lround (uiWidthParam->load (std::memory_order_relaxed)));
+	return juce::jlimit (360, 720, uiEditorWidth.load (std::memory_order_relaxed));
 }
 
 int FREQTRAudioProcessor::getUiEditorHeight() const noexcept
 {
-	const auto fromState = apvts.state.getProperty (UiStateKeys::editorHeight);
-	if (! fromState.isVoid()) return (int) fromState;
-	if (uiHeightParam != nullptr)
-		return (int) std::lround (uiHeightParam->load (std::memory_order_relaxed));
-	return uiEditorHeight.load (std::memory_order_relaxed);
+	return 752;
 }
 
 void FREQTRAudioProcessor::setUiUseCustomPalette (bool shouldUseCustomPalette)

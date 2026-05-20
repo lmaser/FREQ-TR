@@ -30,7 +30,7 @@ FREQ-TR uses a text-based UI with horizontal bar sliders. All controls are visib
 - Collapsible I/O section: click the top triangle bar to switch between the main modulation view and the I/O/filter/routing section.
 - Filter bar: opens the HP/LP prompt.
 - Gear icon: opens the info popup and graphics settings.
-- Resize: bottom-right corner; editor width persists across sessions.
+- Resize: bottom-right corner; new instances open at `360 x 752`, editor width persists, and height stays fixed.
 
 The value column reflects the current context:
 - `FREQ`: hertz, note name, or sync division

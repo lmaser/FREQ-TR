@@ -62,9 +62,11 @@ static juce::String formatInlineFrequency (float hz)
 {
     if (hz < 0.05f)
         return "0Hz";
-    if (hz >= 1000.0f)
-        return juce::String (hz / 1000.0f, 2) + "kHz";
-    return juce::String (hz, 2) + "Hz";
+
+    const float displayHz = std::round (hz * 100.0f) / 100.0f;
+    if (displayHz >= 1000.0f)
+        return juce::String (displayHz / 1000.0f, 2) + "kHz";
+    return juce::String (displayHz, 2) + "Hz";
 }
 
 // ── Mod slider ↔ multiplier conversion ──
@@ -2060,10 +2062,6 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
     {
         setLabelOnly (cachedHarmTextFull, cachedHarmTextShort, cachedHarmIntOnly, "HARM");
     }
-
-    freqSlider.setTooltip (sidechainOn ? "FREQ inactive" : ("FREQ " + cachedFreqIntOnly));
-    combSlider.setTooltip ("CMB " + cachedCombIntOnly);
-    harmSlider.setTooltip (sidechainOn ? "HARM inactive" : (getHarmTextShort() + " HARM"));
 
     if (! freqShiftActive)
     {

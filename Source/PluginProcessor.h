@@ -791,14 +791,14 @@ private:
 	static constexpr float kJitterFeedbackDepthBase = 0.010f;
 	static constexpr float kJitterFeedbackDepthRange = 0.055f;
 	static constexpr float kJitterFeedbackShortBoost = 0.20f;
-	static constexpr float kJitterFeedbackDepthScale = 0.60f;
+	static constexpr float kJitterFeedbackDepthScale = 0.30f;
 	static constexpr float kJitterFeedbackSlowRateScale = 0.80f;
 	static constexpr float kJitterFeedbackFastRateScale = 0.55f;
 	static constexpr float kJitterFeedbackSlowWeight = 0.62f;
 	static constexpr float kJitterFeedbackFastWeightBase = 0.24f;
 	static constexpr float kJitterFeedbackFastShortnessWeight = 0.28f;
 	static constexpr float kJitterFeedbackOutputLimit = 1.0f;
-	static constexpr float kJitterFrequencyDepthScale = 2.0f;
+	static constexpr float kJitterFrequencyDepthScale = 4.0f;
 	static constexpr float kJitterFrequencyFloorHz = 250.0f;
 	static constexpr float kJitterFrequencyRateMinDelayMs = 4.0f;
 	static constexpr float kJitterFrequencyRateMaxDelayMs = 500.0f;

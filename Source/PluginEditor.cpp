@@ -1782,7 +1782,7 @@ juce::String FREQTRAudioProcessorEditor::getHarmText() const
 juce::String FREQTRAudioProcessorEditor::getHarmTextShort() const
 {
     const int pct = juce::roundToInt ((float) harmSlider.getValue() * 100.0f);
-    return juce::String (pct) + "%";
+    return juce::String (pct) + "% HRM";
 }
 
 juce::String FREQTRAudioProcessorEditor::getPolarityText() const
@@ -5874,6 +5874,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "2048 WINDOW",
         "STEREO STYLE", "DUAL STYLE",
         "100% HARM",
+        "100% HRM",
         "-1.00 POLARITY",
         "100% MIX",
         "-INF dB INPUT",

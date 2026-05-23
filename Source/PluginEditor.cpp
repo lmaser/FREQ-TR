@@ -2961,7 +2961,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                 const juce::String numericToken = t.initialSectionContainingOnly ("0123456789.,-");
                 v = numericToken.getDoubleValue();
 
-                // Percent → 0..1 for engine, mix and feedback
+                // Percent input maps to normalized slider units; FBK intentionally supports -100..+100.
                 if (safeThis != nullptr && (sliderPtr == &safeThis->engineSlider
                                          || sliderPtr == &safeThis->harmSlider
                                          || sliderPtr == &safeThis->mixSlider
@@ -2970,7 +2970,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                                          || sliderPtr == &safeThis->panSlider))
                     v *= 0.01;
 
-                // Multiplier → slider for MOD
+                // Multiplier input maps to slider position for MOD.
                 if (safeThis != nullptr && sliderPtr == &safeThis->modSlider)
                     v = multiplierToModSlider (v);
             }

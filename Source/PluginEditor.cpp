@@ -1585,13 +1585,13 @@ juce::String FREQTRAudioProcessorEditor::getModTextShort() const
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackText() const
 {
-    const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, feedbackSlider.getValue()) * 100.0);
+    const int pct = (int) std::lround (juce::jlimit (-1.0, 1.0, feedbackSlider.getValue()) * 100.0);
     return juce::String (pct) + "% FBK";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackTextShort() const
 {
-    const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, feedbackSlider.getValue()) * 100.0);
+    const int pct = (int) std::lround (juce::jlimit (-1.0, 1.0, feedbackSlider.getValue()) * 100.0);
     return juce::String (pct) + "% FBK";
 }
 
@@ -2621,7 +2621,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         else if (&s == &modSlider)
             worstCaseText = "4.00";
         else if (&s == &feedbackSlider)
-            worstCaseText = "100.00";
+            worstCaseText = "-100.00";
         else if (&s == &jitterSlider)
             worstCaseText = "100.00";
         else if (&s == &engineSlider)
@@ -2743,10 +2743,10 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         }
         else if (&s == &feedbackSlider)
         {
-            minVal = 0.0;
+            minVal = -100.0;
             maxVal = 100.0;
             maxDecs = 2;
-            maxLen = 6;
+            maxLen = 7;
         }
         else if (&s == &jitterSlider)
         {
@@ -5866,7 +5866,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "1/64. FREQ",
         "X4.00 MOD",
         "5.00kHz COMB",
-        "100% FBK",
+        "-100% FBK",
         "100% JIT",
         "FREQ SHIFT ENGINE",
         "100% AM|RM ENGINE",

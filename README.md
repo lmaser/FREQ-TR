@@ -98,9 +98,11 @@ Resonant frequency of the feedback delay line. Higher values shorten the feedbac
 
 At 0 Hz the comb control is visually at its floor; when feedback is active, the internal feedback delay uses a safe 0.1 Hz effective minimum.
 
-### FBK (0-100%)
+### FBK (-100 to +100%)
 
 Feeds the wet output back into the Hilbert input. This creates barberpole-like stacks in frequency-shift mode and increasingly metallic recirculation in AM mode.
+
+Negative values invert the feedback loop polarity. `POL` still controls the carrier / frequency-shift direction, so `POL -1` and `FBK -100%` are intentionally different controls.
 
 The feedback path includes:
 - smoothed control response

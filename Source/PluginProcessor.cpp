@@ -845,7 +845,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	float targetFreq   = loadAtomicOrDefault (freqParam, kFreqDefault);
 	const float modVal = loadAtomicOrDefault (modParam, kModDefault);
 	const float rawFeedback = juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault));
-	const float targetFeedback = rawFeedback * rawFeedback * (3.0f - 2.0f * rawFeedback) * 0.99f;
+	const float feedbackSign = rawFeedback < 0.0f ? -1.0f : 1.0f;
+	const float feedbackAbs = std::abs (rawFeedback);
+	const float targetFeedback = feedbackSign * feedbackAbs * feedbackAbs * (3.0f - 2.0f * feedbackAbs) * 0.99f;
 	const float combHz = juce::jlimit (kCombEffectiveMin, kCombMax,
 		loadAtomicOrDefault (combParam, kCombDefault));
 	const float targetComb = (float) juce::jmax (1, (int) std::round (currentSampleRate / (double) combHz));

@@ -462,6 +462,11 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	oscPhaseR = 0.0;
 	amRmOscPhase = 0.0;
 	amRmOscPhaseR = 0.0;
+	syncRetrigPhase = 0.0;
+	useSyncRetrigPhase = false;
+	syncRetrigCycleValid_ = false;
+	lastSyncRetrigCycle_ = 0;
+	lastSyncRetrigPeriodBeats_ = 0.0f;
 	smoothedFreq = 0.0f;
 	smoothedEngine = 0.0f;
 	smoothedHarm = 0.0f;
@@ -942,7 +947,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertWindowCrossfadeRemaining_ = hilbertWindowCrossfadeTotal_;
 	}
 
-	useSyncRetrigPhase = false; // reset per block; set true if SYNC+RETRIG+PPQ
+	useSyncRetrigPhase = false; // set true only when SYNC+RETRIG reaches a new musical cycle
 
 	// Priority: MIDI note > Sync > Manual frequency (same as ECHO-TR)
 	const int  midiNote       = lastMidiNote.load (std::memory_order_relaxed);
@@ -978,7 +983,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 		targetFreq = tempoSyncToHz (freqSyncValue, bpm);
 
-		// ── RETRIG: compute oscPhase from PPQ position ──
+		// ── RETRIG: reset from PPQ only at musical-cycle boundaries ──
+		// Re-anchoring every block creates
+		// block-rate phase correction artifacts in fast sync divisions.
 		const bool retrigEnabled = loadBoolParamOrDefault (retrigParam, false);
 		if (retrigEnabled && ppqAvailable)
 		{
@@ -988,11 +995,30 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			if (periodBeats > 0.0001f)
 			{
-				const double phaseFromPpq = std::fmod (ppqPos / (double) periodBeats, 1.0);
-				syncRetrigPhase = (phaseFromPpq < 0.0) ? phaseFromPpq + 1.0 : phaseFromPpq;
-				useSyncRetrigPhase = true;
+				const double cyclePos = ppqPos / (double) periodBeats;
+				const double cycleFloor = std::floor (cyclePos);
+				const auto cycleIndex = (juce::int64) cycleFloor;
+
+				if (! syncRetrigCycleValid_
+					|| cycleIndex != lastSyncRetrigCycle_
+					|| std::abs (periodBeats - lastSyncRetrigPeriodBeats_) > 1.0e-6f)
+				{
+					syncRetrigPhase = cyclePos - cycleFloor;
+					useSyncRetrigPhase = true;
+					lastSyncRetrigCycle_ = cycleIndex;
+					lastSyncRetrigPeriodBeats_ = periodBeats;
+					syncRetrigCycleValid_ = true;
+				}
 			}
 		}
+		else
+		{
+			syncRetrigCycleValid_ = false;
+		}
+	}
+	else
+	{
+		syncRetrigCycleValid_ = false;
 	}
 
 	// MOD multiplier (hyperbolic below centre, linear above — same as ECHO-TR/DISP-TR)

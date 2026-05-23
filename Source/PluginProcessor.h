@@ -537,6 +537,9 @@ private:
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ
 	bool useSyncRetrigPhase = false;
+	bool syncRetrigCycleValid_ = false;
+	juce::int64 lastSyncRetrigCycle_ = 0;
+	float lastSyncRetrigPeriodBeats_ = 0.0f;
 
 	// ── MIDI note tracking ──
 	std::atomic<float> currentMidiFrequency { 0.0f };

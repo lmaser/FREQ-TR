@@ -1213,9 +1213,9 @@ void FREQTRAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
     auto isBarSlider = [&] (const juce::Slider* s)
     {
         return s == &freqSlider || s == &modSlider || s == &feedbackSlider || s == &jitterSlider || s == &combSlider
-            || s == &engineSlider || s == &windowSlider
-        || s == &styleSlider || s == &harmSlider || s == &polaritySlider || s == &mixSlider
-            || s == &inputSlider || s == &outputSlider;
+            || s == &engineSlider || s == &windowSlider || s == &styleSlider || s == &harmSlider || s == &polaritySlider
+            || s == &inputSlider || s == &outputSlider || s == &tiltSlider || s == &panSlider || s == &mixSlider
+            || s == &limThresholdSlider;
     };
 
     if (slider == &feedbackSlider)

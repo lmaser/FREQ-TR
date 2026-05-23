@@ -4,6 +4,9 @@
 
 namespace
 {
+	// Match ECHO-TR delay-time smoothing for the internal Comb feedback delay.
+	constexpr float kCombSmoothTauSeconds = 0.08f;
+
 	inline float loadAtomicOrDefault (std::atomic<float>* p, float def) noexcept
 	{
 		return p != nullptr ? p->load (std::memory_order_relaxed) : def;
@@ -464,9 +467,6 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	amRmOscPhaseR = 0.0;
 	syncRetrigPhase = 0.0;
 	useSyncRetrigPhase = false;
-	syncRetrigCycleValid_ = false;
-	lastSyncRetrigCycle_ = 0;
-	lastSyncRetrigPeriodBeats_ = 0.0f;
 	smoothedFreq = 0.0f;
 	smoothedEngine = 0.0f;
 	smoothedHarm = 0.0f;
@@ -500,6 +500,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	fbkDelayBufL.assign ((size_t) fbkDelaySize, 0.0f);
 	fbkDelayBufR.assign ((size_t) fbkDelaySize, 0.0f);
 	fbkDelayWritePos = 0;
+	combSmoothCoeff_ = std::exp (-1.0f / ((float) currentSampleRate * kCombSmoothTauSeconds));
 	{
 		const float initCombHz = juce::jlimit (kCombEffectiveMin, kCombMax,
 			loadAtomicOrDefault (combParam, kCombDefault));
@@ -947,7 +948,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertWindowCrossfadeRemaining_ = hilbertWindowCrossfadeTotal_;
 	}
 
-	useSyncRetrigPhase = false; // set true only when SYNC+RETRIG reaches a new musical cycle
+	useSyncRetrigPhase = false; // true only for sample-accurate SYNC+RETRIG PPQ phase
+	double syncRetrigPpqStart = 0.0;
+	double syncRetrigPpqPerSample = 0.0;
+	float syncRetrigPeriodBeats = 1.0f;
 
 	// Priority: MIDI note > Sync > Manual frequency (same as ECHO-TR)
 	const int  midiNote       = lastMidiNote.load (std::memory_order_relaxed);
@@ -983,9 +987,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		}
 		targetFreq = tempoSyncToHz (freqSyncValue, bpm);
 
-		// ── RETRIG: reset from PPQ only at musical-cycle boundaries ──
-		// Re-anchoring every block creates
-		// block-rate phase correction artifacts in fast sync divisions.
+		// ── RETRIG: derive oscillator phase directly from PPQ ──
+		// Hard phase resets at cycle boundaries can click at fast divisions,
+		// especially with MOD multipliers. A sample-accurate PPQ phase keeps
+		// SYNC+RETRIG locked without block-boundary phase jumps.
 		const bool retrigEnabled = loadBoolParamOrDefault (retrigParam, false);
 		if (retrigEnabled && ppqAvailable)
 		{
@@ -995,30 +1000,14 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			if (periodBeats > 0.0001f)
 			{
-				const double cyclePos = ppqPos / (double) periodBeats;
-				const double cycleFloor = std::floor (cyclePos);
-				const auto cycleIndex = (juce::int64) cycleFloor;
-
-				if (! syncRetrigCycleValid_
-					|| cycleIndex != lastSyncRetrigCycle_
-					|| std::abs (periodBeats - lastSyncRetrigPeriodBeats_) > 1.0e-6f)
-				{
-					syncRetrigPhase = cyclePos - cycleFloor;
-					useSyncRetrigPhase = true;
-					lastSyncRetrigCycle_ = cycleIndex;
-					lastSyncRetrigPeriodBeats_ = periodBeats;
-					syncRetrigCycleValid_ = true;
-				}
+				syncRetrigPpqStart = ppqPos;
+				syncRetrigPpqPerSample = bpm / (60.0 * currentSampleRate);
+				syncRetrigPeriodBeats = periodBeats;
+				syncRetrigPhase = ppqPos / (double) periodBeats;
+				syncRetrigPhase -= std::floor (syncRetrigPhase);
+				useSyncRetrigPhase = true;
 			}
 		}
-		else
-		{
-			syncRetrigCycleValid_ = false;
-		}
-	}
-	else
-	{
-		syncRetrigCycleValid_ = false;
 	}
 
 	// MOD multiplier (hyperbolic below centre, linear above — same as ECHO-TR/DISP-TR)
@@ -1154,10 +1143,19 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const int modeInVal  = loadIntParamOrDefault (modeInParam,  kModeInOutDefault);
 	const int modeOutVal = loadIntParamOrDefault (modeOutParam, kModeInOutDefault);
 	const int sumBusVal  = loadIntParamOrDefault (sumBusParam,  kSumBusDefault);
-	double syncPhaseAccumL = syncRetrigPhase;
-	double syncPhaseAccumR = syncRetrigPhase;
-	double syncAmRmPhaseAccumL = syncRetrigPhase;
-	double syncAmRmPhaseAccumR = syncRetrigPhase;
+	const auto wrapPhase01 = [] (double phase) noexcept
+	{
+		phase -= std::floor (phase);
+		return phase;
+	};
+	const double syncRetrigRatioL = (double) freqMultiplier * (double) polarity;
+	const double syncRetrigRatioR = syncRetrigRatioL * ((style == 3) ? 0.5 : 1.0);
+	const bool syncRetrigPpqPhaseLocked = useSyncRetrigPhase && ! jitterActive_;
+	const double syncCyclePosAtBlockStart = syncRetrigPpqPhaseLocked
+		? (syncRetrigPpqStart / (double) syncRetrigPeriodBeats)
+		: syncRetrigPhase;
+	double syncAmRmPhaseAccumL = useSyncRetrigPhase ? wrapPhase01 (syncCyclePosAtBlockStart * syncRetrigRatioL) : syncRetrigPhase;
+	double syncAmRmPhaseAccumR = useSyncRetrigPhase ? wrapPhase01 (syncCyclePosAtBlockStart * syncRetrigRatioR) : syncRetrigPhase;
 
 	auto processSidechainTone = [&] (float x, SidechainToneFilterState& state) noexcept
 	{
@@ -1220,10 +1218,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			baseFreqR + amRmJitterDeviationSmoothed_[1]);
 
 		// ── Phase: retrig from PPQ or free-running ──
+		if (syncRetrigPpqPhaseLocked)
+		{
+			const double cyclePos = (syncRetrigPpqStart + (double) n * syncRetrigPpqPerSample)
+				/ (double) syncRetrigPeriodBeats;
+			syncAmRmPhaseAccumL = wrapPhase01 (cyclePos * syncRetrigRatioL);
+			syncAmRmPhaseAccumR = wrapPhase01 (cyclePos * syncRetrigRatioR);
+		}
+
 		if (useSyncRetrigPhase)
 		{
-			oscPhase = syncPhaseAccumL;
-			oscPhase -= std::floor (oscPhase);
 			amRmOscPhase = syncAmRmPhaseAccumL;
 			amRmOscPhase -= std::floor (amRmOscPhase);
 		}
@@ -1232,8 +1236,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// WIDE uses the same oscillator as L (opposite sideband, not different rate)
 		if (useSyncRetrigPhase)
 		{
-			oscPhaseR = syncPhaseAccumR;
-			oscPhaseR -= std::floor (oscPhaseR);
 			amRmOscPhaseR = syncAmRmPhaseAccumR;
 			amRmOscPhaseR -= std::floor (amRmOscPhaseR);
 		}
@@ -1303,7 +1305,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// Smooth the comb size to avoid clicks
 		const float jitteredTargetComb = applyJitterToCombTarget (targetComb);
-		smoothedComb_ = smoothedComb_ * 0.999f + jitteredTargetComb * 0.001f;
+		smoothedComb_ = smoothedComb_ * combSmoothCoeff_ + jitteredTargetComb * (1.0f - combSmoothCoeff_);
 		const int combSamples = juce::jlimit (1, juce::jmax (1, fbkDelaySize),
 			(int) std::round (smoothedComb_));
 
@@ -1915,15 +1917,26 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		if (writeR != nullptr) writeR[n] = outR;
 
 		// Advance oscillator phase
-		if (useSyncRetrigPhase)
+		if (syncRetrigPpqPhaseLocked)
 		{
-			syncPhaseAccumL += (double) jitteredFreqL * (double) invSr;
-			syncPhaseAccumL -= std::floor (syncPhaseAccumL);
-			oscPhase = syncPhaseAccumL;
+			const double nextCyclePos = (syncRetrigPpqStart + (double) (n + 1) * syncRetrigPpqPerSample)
+				/ (double) syncRetrigPeriodBeats;
+			oscPhase += (double) jitteredFreqL * (double) invSr;
+			oscPhase -= std::floor (oscPhase);
 
-			syncPhaseAccumR += (double) jitteredFreqR * (double) invSr;
-			syncPhaseAccumR -= std::floor (syncPhaseAccumR);
-			oscPhaseR = syncPhaseAccumR;
+			oscPhaseR += (double) jitteredFreqR * (double) invSr;
+			oscPhaseR -= std::floor (oscPhaseR);
+
+			amRmOscPhase = wrapPhase01 (nextCyclePos * syncRetrigRatioL);
+			amRmOscPhaseR = wrapPhase01 (nextCyclePos * syncRetrigRatioR);
+		}
+		else if (useSyncRetrigPhase)
+		{
+			oscPhase += (double) jitteredFreqL * (double) invSr;
+			oscPhase -= std::floor (oscPhase);
+
+			oscPhaseR += (double) jitteredFreqR * (double) invSr;
+			oscPhaseR -= std::floor (oscPhaseR);
 
 			syncAmRmPhaseAccumL += (double) amRmFreqL * (double) invSr;
 			syncAmRmPhaseAccumL -= std::floor (syncAmRmPhaseAccumL);

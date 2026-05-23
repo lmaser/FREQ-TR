@@ -498,6 +498,7 @@ private:
 	int   fbkDelaySize = 1;
 	int   fbkDelayWritePos = 0;
 	float smoothedComb_ = 5.0f;
+	float combSmoothCoeff_ = 0.999f;
 
 	// ── Feedback DC blocker (one-pole HP ~5 Hz) ──
 	static constexpr float kFbkDcBlockHz = 5.0f;
@@ -537,9 +538,6 @@ private:
 	// ── Retrig (sync phase anchor) ──
 	double syncRetrigPhase = 0.0;  // phase derived from PPQ
 	bool useSyncRetrigPhase = false;
-	bool syncRetrigCycleValid_ = false;
-	juce::int64 lastSyncRetrigCycle_ = 0;
-	float lastSyncRetrigPeriodBeats_ = 0.0f;
 
 	// ── MIDI note tracking ──
 	std::atomic<float> currentMidiFrequency { 0.0f };

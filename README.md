@@ -85,7 +85,7 @@ When `SIDECHAIN` is active, the internal oscillator carrier is replaced by the s
 
 29 tempo divisions, ordered by real duration and capped at `8/1`, covering fast triplet / straight / dotted divisions through long musical values.
 
-### MOD
+### MOD (x0.25-x4.0)
 
 Frequency multiplier applied to the effective frequency:
 - 0% = x0.25

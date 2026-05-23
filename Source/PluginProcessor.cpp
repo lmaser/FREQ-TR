@@ -2254,6 +2254,7 @@ bool FREQTRAudioProcessor::getUiUseCustomPalette() const noexcept
 {
 	const auto fromState = apvts.state.getProperty (UiStateKeys::useCustomPalette);
 	if (! fromState.isVoid()) return (bool) fromState;
+	if (uiPaletteParam != nullptr) return uiPaletteParam->load (std::memory_order_relaxed) > 0.5f;
 	return uiUseCustomPalette.load (std::memory_order_relaxed) != 0;
 }
 
@@ -2269,6 +2270,7 @@ bool FREQTRAudioProcessor::getUiCrtEnabled() const noexcept
 {
 	const auto fromState = apvts.state.getProperty (UiStateKeys::crtEnabled);
 	if (! fromState.isVoid()) return (bool) fromState;
+	if (uiCrtParam != nullptr) return uiCrtParam->load (std::memory_order_relaxed) > 0.5f;
 	return uiCrtEnabled.load (std::memory_order_relaxed) != 0;
 }
 

@@ -522,7 +522,7 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	fbkLpStateL = fbkLpStateR = {};
 
 	// Report latency if PDC enabled
-	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, true);
+	const bool pdcEnabled = loadBoolParamOrDefault (pdcParam, false);
 	updateReportedLatency (pdcEnabled ? getHilbertDelayForWindow (activeMaxHilbertWindow_) : 0);
 
 	// Reset wet filter state
@@ -889,8 +889,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
 	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
 	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
-	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, true);
-	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, true);
+	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, false);
+	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, false);
 	const float sidechainTimeTarget = juce::jlimit (kSidechainTimeMin, kSidechainTimeMax,
 		loadAtomicOrDefault (sidechainTimeParam, kSidechainTimeDefault));
 	const float sidechainToneTarget = juce::jlimit (kSidechainToneMin, kSidechainToneMax,
@@ -2062,8 +2062,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSync, "Sync", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamRetrig, "Retrig", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamMidi, "MIDI", false));
-	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamAlign, "Align", true));
-	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamPdc, "PDC", true));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamAlign, "Align", false));
+	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamPdc, "PDC", false));
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSidechain, "Sidechain", false));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamSidechainTime, "Sidechain Time",

@@ -51,11 +51,7 @@ static juce::String formatGainFaderDbCompact (float dB)
 
 static juce::String formatFilterPromptFrequency (float hz)
 {
-    if (hz >= 1000.0f)
-        return juce::String (hz, 2);
-    if (hz >= 100.0f)
-        return juce::String (hz, 1);
-    return juce::String (hz, 2);
+    return juce::String (juce::roundToInt (juce::jlimit (20.0f, 20000.0f, hz)));
 }
 
 static juce::String formatInlineFrequency (float hz)

@@ -266,8 +266,8 @@ Limiter mode:
 - `GLOBAL`
 
 The limiter is a stereo-linked transparent 2-stage design:
-- Stage 1: 2 ms attack / 10 ms release
-- Stage 2: instant attack / 100 ms release
+- Stage 1 catches sustained overs
+- Stage 2 catches transient peaks
 
 ### INV POL / INV STR
 

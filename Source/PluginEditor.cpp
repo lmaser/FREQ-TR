@@ -1838,7 +1838,7 @@ juce::String FREQTRAudioProcessorEditor::getMixTextShort() const
         return juce::String (dB, 1) + "dB" + suffix;
     }
     const int pct = (int) std::lround (mixSlider.getValue() * 100.0);
-    return juce::String (pct) + "% MX";
+    return juce::String (pct) + "% MIX";
 }
 
 juce::String FREQTRAudioProcessorEditor::getInputText() const

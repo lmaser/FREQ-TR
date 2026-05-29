@@ -2147,7 +2147,7 @@ void FREQTRAudioProcessorEditor::updateFreqSliderForSyncMode()
                              (double) FREQTRAudioProcessor::kFreqMax,
                              0.0);
         freqSlider.setDoubleClickReturnValue (true, (double) FREQTRAudioProcessor::kFreqDefault);
-        freqSlider.setSkewFactor (0.35);
+        freqSlider.setSkewFactor ((double) FREQTRAudioProcessor::kFreqSkew);
     }
 
     refreshLegendTextCache();

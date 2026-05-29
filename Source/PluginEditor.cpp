@@ -1579,8 +1579,8 @@ juce::String FREQTRAudioProcessorEditor::getModTextShort() const
 {
     const float mult = (float) modSliderToMultiplier (modSlider.getValue());
     if (std::abs (mult - 1.0f) < kMultEpsilon)
-        return "X1";
-    return "X" + juce::String (mult, 2);
+        return "X1 MOD";
+    return "X" + juce::String (mult, 2)  + " MOD";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackText() const
@@ -1838,7 +1838,7 @@ juce::String FREQTRAudioProcessorEditor::getMixTextShort() const
         return juce::String (dB, 1) + "dB" + suffix;
     }
     const int pct = (int) std::lround (mixSlider.getValue() * 100.0);
-    return juce::String (pct) + "% MX";
+    return juce::String (pct) + "% MIX";
 }
 
 juce::String FREQTRAudioProcessorEditor::getInputText() const
@@ -2147,7 +2147,7 @@ void FREQTRAudioProcessorEditor::updateFreqSliderForSyncMode()
                              (double) FREQTRAudioProcessor::kFreqMax,
                              0.0);
         freqSlider.setDoubleClickReturnValue (true, (double) FREQTRAudioProcessor::kFreqDefault);
-        freqSlider.setSkewFactor (0.35);
+        freqSlider.setSkewFactor ((double) FREQTRAudioProcessor::kFreqSkew);
     }
 
     refreshLegendTextCache();

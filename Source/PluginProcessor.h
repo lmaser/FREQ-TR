@@ -88,6 +88,7 @@ public:
 	static constexpr float kFreqMin     =  0.0f;
 	static constexpr float kFreqMax     =  5000.0f;
 	static constexpr float kFreqDefault =  0.0f;
+	static constexpr float kFreqSkew    =  0.22307028f; // 10 Hz at 25% of the manual range.
 
 	static constexpr int kFreqSyncMin     = 0;
 	static constexpr int kFreqSyncMax     = 28;       // 29 divisions, ordered by real duration and capped at 8/1.

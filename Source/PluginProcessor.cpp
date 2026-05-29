@@ -2041,7 +2041,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	// Frequency: 0 to 5000 Hz, continuous
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamFreq, "Frequency",
-		juce::NormalisableRange<float> (kFreqMin, kFreqMax, 0.0f, 0.35f), kFreqDefault));
+		juce::NormalisableRange<float> (kFreqMin, kFreqMax, 0.0f, kFreqSkew), kFreqDefault));
 
 	// Frequency sync: choice parameter, ordered by real duration and capped at 8/1.
 	params.push_back (std::make_unique<juce::AudioParameterChoice> (

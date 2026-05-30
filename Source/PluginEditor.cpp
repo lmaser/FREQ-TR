@@ -1564,7 +1564,7 @@ juce::String FREQTRAudioProcessorEditor::getFreqTextShort() const
     }
 
     const float hz = (float) freqSlider.getValue();
-    return formatInlineFrequency (hz) + " FRQ";
+    return formatInlineFrequency (hz) + " FREQ";
 }
 
 juce::String FREQTRAudioProcessorEditor::getModText() const
@@ -1616,7 +1616,7 @@ juce::String FREQTRAudioProcessorEditor::getCombText() const
 juce::String FREQTRAudioProcessorEditor::getCombTextShort() const
 {
     const float hz = (float) combSlider.getValue();
-    return formatInlineFrequency (hz) + " CMB";
+    return formatInlineFrequency (hz) + " COMB";
 }
 
 void FREQTRAudioProcessorEditor::updateCombEnabled()
@@ -2567,6 +2567,10 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         currentDisplay = juce::String (s.getValue() * 100.0, 2);
     else if (&s == &panSlider)
         currentDisplay = juce::String (juce::jlimit (0.0, 100.0, s.getValue() * 100.0), 0);
+    else if (&s == &freqSlider && ! isFreqSyncMode)
+        currentDisplay = juce::String (s.getValue(), 3);
+    else if (&s == &combSlider)
+        currentDisplay = juce::String (s.getValue(), 3);
     else
         currentDisplay = s.getTextFromValue (s.getValue());
 
@@ -2761,6 +2765,13 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             maxVal = 4.0;
             maxDecs = 2;
             maxLen = 4;
+        }
+        else if (&s == &combSlider)
+        {
+            minVal = FREQTRAudioProcessor::kCombMin;
+            maxVal = FREQTRAudioProcessor::kCombMax;
+            maxDecs = 3;
+            maxLen = 8; // "5000.000"
         }
         else if (&s == &feedbackSlider)
         {

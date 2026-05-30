@@ -1598,7 +1598,7 @@ juce::String FREQTRAudioProcessorEditor::getFeedbackTextShort() const
 juce::String FREQTRAudioProcessorEditor::getJitterText() const
 {
     const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, jitterSlider.getValue()) * 100.0);
-    return juce::String (pct) + "% JIT";
+    return juce::String (pct) + "% JITTER";
 }
 
 juce::String FREQTRAudioProcessorEditor::getJitterTextShort() const
@@ -5894,7 +5894,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "X4.00 MOD",
         "5.00kHz COMB",
         "-100% FBK",
-        "100% JIT",
+        "100% JITTER",
         "FREQ SHIFT ENGINE",
         "100% AM|RM ENGINE",
         "100% RM|FS ENGINE",

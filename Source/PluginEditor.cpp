@@ -2535,7 +2535,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     }
     else if (&s == &modSlider)       { prefix = "X";           suffix = " MOD";      suffixShort = " MOD"; }
     else if (&s == &feedbackSlider)  { suffix = " % FBK";      suffixShort = " % FBK"; }
-    else if (&s == &jitterSlider)    { suffix = " % JIT";      suffixShort = " % JIT"; }
+    else if (&s == &jitterSlider)    { suffix = " % JITTER";      suffixShort = " % JIT"; }
     else if (&s == &combSlider)      { suffix = " Hz";         suffixShort = " Hz"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " % ENG"; }
     else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " % HARM"; }
@@ -2672,7 +2672,9 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
             const int spaceWFull = stickPercentFull ? 0 : juce::jmax (2, stringWidth (suffixLabel->getFont(), " "));
             const int worstCaseFullW = prefixW + maxInputTextW + spaceWFull + fullLabelW;
 
-            const bool useShort = (worstCaseFullW > availableW) && suffixTextShort != suffixText;
+            constexpr int kPromptShortLabelComfortPx = 8;
+            const bool useShort = (worstCaseFullW > (availableW - kPromptShortLabelComfortPx))
+                               && suffixTextShort != suffixText;
             const juce::String& activeSuffix = useShort ? suffixTextShort : suffixText;
             suffixLabel->setText (activeSuffix, juce::dontSendNotification);
 

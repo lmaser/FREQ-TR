@@ -488,9 +488,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainRmsEnv_ = 0.0f;
 	sidechainGateSmoothed_ = 0.0f;
 	sidechainDepthSmoothed_ = 0.0f;
-	lastMidiNote.store (-1, std::memory_order_relaxed);
-	lastMidiVelocity.store (0, std::memory_order_relaxed);
-	currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
+	clearPendingMidiEvents();
+	clearMidiTrackingState();
 
 	feedbackSmoothed.reset (currentSampleRate, kFeedbackSmoothingSeconds);
 	feedbackSmoothed.setCurrentAndTargetValue (juce::jlimit (kFeedbackMin, kFeedbackMax, loadAtomicOrDefault (feedbackParam, kFeedbackDefault)));
@@ -700,6 +699,8 @@ void FREQTRAudioProcessor::releaseResources()
 	sidechainHilbertBufR.clear();
 	for (auto& taps : hilbertFoldedTapsByWindow_)
 		taps.clear();
+	clearPendingMidiEvents();
+	clearMidiTrackingState();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -784,6 +785,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	// ── MIDI note tracking ──
 	const bool midiEnabled = loadBoolParamOrDefault (midiParam, false);
+	const int midiDelaySamples = juce::jmax (0, (int) std::lround ((double) currentSampleRate
+		* (double) juce::jlimit (0, 100, getMidiDelayMs()) / 1000.0));
 
 	if (midiEnabled && ! midiMessages.isEmpty())
 	{
@@ -795,39 +798,31 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			if (selectedMidiChannel > 0 && msg.getChannel() != selectedMidiChannel)
 				continue;
 
+			auto queueMidiEvent = [this, midiDelaySamples, metadata, numSamples] (PendingMidiEvent event)
+			{
+				const int eventSampleInBlock = juce::jlimit (0, juce::jmax (0, numSamples - 1), metadata.samplePosition);
+				event.samplesRemaining = juce::jmax (0, eventSampleInBlock + midiDelaySamples);
+				enqueuePendingMidiEvent (event);
+			};
+
 			if (msg.isAllNotesOff() || msg.isAllSoundOff())
 			{
-				lastMidiNote.store (-1, std::memory_order_relaxed);
-				lastMidiVelocity.store (0, std::memory_order_relaxed);
-				currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
+				queueMidiEvent ({ PendingMidiEventType::allNotesOff, -1, 0, 0 });
 			}
 			else if (msg.isNoteOn())
 			{
-				const int noteNumber = msg.getNoteNumber();
-				lastMidiNote.store (noteNumber, std::memory_order_relaxed);
-				lastMidiVelocity.store (msg.getVelocity(), std::memory_order_relaxed);
-				const float frequency = 440.0f * std::exp2 ((noteNumber - 69) * (1.0f / 12.0f));
-				currentMidiFrequency.store (frequency, std::memory_order_relaxed);
+				queueMidiEvent ({ PendingMidiEventType::noteOn, msg.getNoteNumber(), msg.getVelocity(), 0 });
 			}
 			else if (msg.isNoteOff())
 			{
-				if (msg.getNoteNumber() == lastMidiNote.load (std::memory_order_relaxed))
-				{
-					lastMidiNote.store (-1, std::memory_order_relaxed);
-					lastMidiVelocity.store (0, std::memory_order_relaxed);
-					currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
-				}
+				queueMidiEvent ({ PendingMidiEventType::noteOff, msg.getNoteNumber(), 0, 0 });
 			}
 		}
 	}
 	else if (! midiEnabled)
 	{
-		if (lastMidiNote.load (std::memory_order_relaxed) >= 0)
-		{
-			lastMidiNote.store (-1, std::memory_order_relaxed);
-			lastMidiVelocity.store (0, std::memory_order_relaxed);
-			currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
-		}
+		clearPendingMidiEvents();
+		clearMidiTrackingState();
 	}
 
 	for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
@@ -954,6 +949,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	double syncRetrigPpqStart = 0.0;
 	double syncRetrigPpqPerSample = 0.0;
 	float syncRetrigPeriodBeats = 1.0f;
+	const int freqSyncValue = loadIntParamOrDefault (
+		apvts.getRawParameterValue (kParamFreqSync), kFreqSyncDefault);
 
 	// Priority: MIDI note > Sync > Manual frequency (same as ECHO-TR)
 	const int  midiNote       = lastMidiNote.load (std::memory_order_relaxed);
@@ -967,8 +964,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	}
 	else if (syncEnabled)
 	{
-		const int freqSyncValue = loadIntParamOrDefault (
-			apvts.getRawParameterValue (kParamFreqSync), kFreqSyncDefault);
 		double bpm = 120.0;
 		double ppqPos = 0.0;
 		bool ppqAvailable = false;
@@ -1159,6 +1154,55 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	double syncAmRmPhaseAccumL = useSyncRetrigPhase ? wrapPhase01 (syncCyclePosAtBlockStart * syncRetrigRatioL) : syncRetrigPhase;
 	double syncAmRmPhaseAccumR = useSyncRetrigPhase ? wrapPhase01 (syncCyclePosAtBlockStart * syncRetrigRatioR) : syncRetrigPhase;
 
+	int runtimeMidiNote = midiNote;
+	int runtimeMidiVelocity = lastMidiVelocity.load (std::memory_order_relaxed);
+	float runtimeMidiFrequency = currentMidiFrequency.load (std::memory_order_relaxed);
+	bool runtimeMidiNoteActive = midiNoteActive;
+	float runtimeTargetFreq = targetFreq;
+	float runtimeFreqCoeff = freqCoeff;
+
+	auto refreshRuntimeMidiDerivedState = [&]()
+	{
+		runtimeMidiNote = lastMidiNote.load (std::memory_order_relaxed);
+		runtimeMidiVelocity = lastMidiVelocity.load (std::memory_order_relaxed);
+		runtimeMidiFrequency = currentMidiFrequency.load (std::memory_order_relaxed);
+		runtimeMidiNoteActive = midiEnabled && (runtimeMidiNote >= 0);
+		runtimeTargetFreq = loadAtomicOrDefault (freqParam, kFreqDefault);
+
+		if (runtimeMidiNoteActive)
+		{
+			if (runtimeMidiFrequency > 0.1f)
+				runtimeTargetFreq = runtimeMidiFrequency;
+		}
+		else if (syncEnabled)
+		{
+			double bpm = 120.0;
+			auto posInfo = getPlayHead();
+			if (posInfo != nullptr)
+			{
+				auto pos = posInfo->getPosition();
+				if (pos.hasValue() && pos->getBpm().hasValue())
+					bpm = *pos->getBpm();
+			}
+			runtimeTargetFreq = tempoSyncToHz (freqSyncValue, bpm);
+		}
+
+		runtimeTargetFreq *= freqMultiplier * polarity;
+		runtimeTargetFreq = juce::jlimit (-kFreqMax * 4.0f, kFreqMax * 4.0f, runtimeTargetFreq);
+		runtimeFreqCoeff = cachedFreqEmaCoeff_;
+
+		if (runtimeMidiNoteActive)
+		{
+			const float vel  = (float) runtimeMidiVelocity;
+			const float tLin = juce::jlimit (0.0f, 1.0f, (vel - 1.0f) / 126.0f);
+			constexpr float kTauMax = 0.200f;
+			constexpr float kTauMin = 0.0002f;
+			const float t   = std::pow (tLin, 0.05f);
+			const float tau = kTauMax - t * (kTauMax - kTauMin);
+			runtimeFreqCoeff = std::exp (-1.0f / ((float) currentSampleRate * tau));
+		}
+	};
+
 	auto processSidechainTone = [&] (float x, SidechainToneFilterState& state) noexcept
 	{
 		const float oneY = sidechainToneOneB0 * x + sidechainToneOneB1 * state.oneX1
@@ -1180,7 +1224,30 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	for (int n = 0; n < numSamples; ++n)
 	{
-		smoothedFreq = freqCoeff * smoothedFreq + (1.0f - freqCoeff) * targetFreq;
+		if (pendingMidiEventCount_ > 0)
+		{
+			bool appliedMidiEvent = false;
+			int writeIndex = 0;
+			for (int eventIndex = 0; eventIndex < pendingMidiEventCount_; ++eventIndex)
+			{
+				const auto event = pendingMidiEvents_[(size_t) eventIndex];
+				if (event.samplesRemaining == n)
+				{
+					applyPendingMidiEvent (event);
+					appliedMidiEvent = true;
+				}
+				else
+				{
+					pendingMidiEvents_[(size_t) writeIndex++] = event;
+				}
+			}
+			pendingMidiEventCount_ = writeIndex;
+
+			if (appliedMidiEvent)
+				refreshRuntimeMidiDerivedState();
+		}
+
+		smoothedFreq = runtimeFreqCoeff * smoothedFreq + (1.0f - runtimeFreqCoeff) * runtimeTargetFreq;
 		smoothedEngine = paramCoeff * smoothedEngine + (1.0f - paramCoeff) * engine;
 		smoothedHarm   = paramCoeff * smoothedHarm   + (1.0f - paramCoeff) * harm;
 		smoothedMix    = paramCoeff * smoothedMix    + (1.0f - paramCoeff) * mix;
@@ -1966,6 +2033,12 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertPos = (hilbertPos + 1) & orderMask;
 	}
 
+	if (pendingMidiEventCount_ > 0)
+	{
+		for (int eventIndex = 0; eventIndex < pendingMidiEventCount_; ++eventIndex)
+			pendingMidiEvents_[(size_t) eventIndex].samplesRemaining -= numSamples;
+	}
+
 	// ── Invert Polarity / Stereo (GLOBAL mode: after Limiter GLOBAL, before safety clip) ──
 	{
 		const int nc = numChannels;
@@ -2019,6 +2092,10 @@ void FREQTRAudioProcessor::setStateInformation (const void* data, int sizeInByte
 			const auto restoredChannel = apvts.state.getProperty (UiStateKeys::midiPort);
 			if (! restoredChannel.isVoid())
 				midiChannel.store ((int) restoredChannel, std::memory_order_relaxed);
+
+			const auto restoredDelay = apvts.state.getProperty (UiStateKeys::midiDelayMs);
+			if (! restoredDelay.isVoid())
+				midiDelayMs.store (juce::jlimit (0, 100, (int) restoredDelay), std::memory_order_relaxed);
 		}
 	}
 }
@@ -2298,6 +2375,64 @@ int FREQTRAudioProcessor::getMidiChannel() const noexcept
 	const auto fromState = apvts.state.getProperty (UiStateKeys::midiPort);
 	if (! fromState.isVoid()) return (int) fromState;
 	return midiChannel.load (std::memory_order_relaxed);
+}
+
+void FREQTRAudioProcessor::clearMidiTrackingState() noexcept
+{
+	lastMidiNote.store (-1, std::memory_order_relaxed);
+	lastMidiVelocity.store (0, std::memory_order_relaxed);
+	currentMidiFrequency.store (0.0f, std::memory_order_relaxed);
+}
+
+void FREQTRAudioProcessor::clearPendingMidiEvents() noexcept
+{
+	pendingMidiEventCount_ = 0;
+}
+
+void FREQTRAudioProcessor::enqueuePendingMidiEvent (const PendingMidiEvent& event) noexcept
+{
+	if (pendingMidiEventCount_ >= kPendingMidiEventCapacity)
+		return;
+
+	pendingMidiEvents_[(size_t) pendingMidiEventCount_++] = event;
+}
+
+void FREQTRAudioProcessor::applyPendingMidiEvent (const PendingMidiEvent& event) noexcept
+{
+	switch (event.type)
+	{
+		case PendingMidiEventType::allNotesOff:
+			clearMidiTrackingState();
+			return;
+
+		case PendingMidiEventType::noteOn:
+		{
+			lastMidiNote.store (event.note, std::memory_order_relaxed);
+			lastMidiVelocity.store (event.velocity, std::memory_order_relaxed);
+			const float frequency = 440.0f * std::exp2 ((event.note - 69) * (1.0f / 12.0f));
+			currentMidiFrequency.store (frequency, std::memory_order_relaxed);
+			return;
+		}
+
+		case PendingMidiEventType::noteOff:
+			if (event.note == lastMidiNote.load (std::memory_order_relaxed))
+				clearMidiTrackingState();
+			return;
+	}
+}
+
+void FREQTRAudioProcessor::setMidiDelayMs (int delayMsValue)
+{
+	const int clamped = juce::jlimit (0, 100, delayMsValue);
+	midiDelayMs.store (clamped, std::memory_order_relaxed);
+	apvts.state.setProperty (UiStateKeys::midiDelayMs, clamped, nullptr);
+}
+
+int FREQTRAudioProcessor::getMidiDelayMs() const noexcept
+{
+	const auto fromState = apvts.state.getProperty (UiStateKeys::midiDelayMs);
+	if (! fromState.isVoid()) return juce::jlimit (0, 100, (int) fromState);
+	return midiDelayMs.load (std::memory_order_relaxed);
 }
 
 void FREQTRAudioProcessor::setUiCustomPaletteColour (int index, juce::Colour colour)

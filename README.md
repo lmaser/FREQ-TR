@@ -195,6 +195,8 @@ Velocity also affects glide speed:
 - high velocity = near-instant pitch transition
 - low velocity = longer glide
 
+The MIDI prompt exposes both `CHANNEL` and `DELAY`. `DELAY` shifts incoming MIDI control by `0-100 ms` relative to the audio without changing note pitch mapping or glide behaviour.
+
 ### ALIGN
 
 Delays the dry reference to match the selected maximum Hilbert transform group delay, so dry and wet remain phase coherent when mixed.
@@ -292,6 +294,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 
 - monophonic last-note priority
 - OMNI or channel-specific operation
+- `0-100 ms` MIDI delay available in the prompt
 - note frequency follows standard `440 * 2^((note - 69) / 12)`
 - priority order: MIDI > SYNC > manual FREQ
 

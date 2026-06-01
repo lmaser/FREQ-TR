@@ -4011,7 +4011,8 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             name->setBounds (blockLeft, y, maxLabelW, rowH);
             auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + labelValueGap, y, editorW, rowH);
             te->setBounds (textBounds);
-            unit->setBounds (textBounds.getRight() + unitGap, y, unitW, rowH);
+            const int textRightX = textBounds.getX() + ((editorW - textW) / 2) + textW;
+            unit->setBounds (textRightX + unitGap, y, unitW, rowH);
             bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
         };
 

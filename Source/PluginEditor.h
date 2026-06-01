@@ -172,6 +172,24 @@ private:
         bool allowNumericPopup = true;
     };
 
+    class MainGuiPromptToggleButton : public juce::ToggleButton
+    {
+    public:
+        using juce::ToggleButton::ToggleButton;
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (! e.mods.isPopupMenu())
+                juce::ToggleButton::mouseDown (e);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (! e.mods.isPopupMenu())
+                juce::ToggleButton::mouseUp (e);
+        }
+    };
+
     // 16 bars: INPUT, OUTPUT, MIX, FREQ, MOD, COMB, FEEDBACK, ENGINE, WIN, HARM, POLARITY, JIT, STYLE, TILT, PAN, LIMTHRESHOLD
     BarSlider inputSlider;
     BarSlider outputSlider;
@@ -287,20 +305,20 @@ private:
     DualMixBarComponent dualMixBar_;
 
     // 2 checkboxes: SYNC, MIDI
-    juce::ToggleButton syncButton;
-    juce::ToggleButton midiButton;
+    MainGuiPromptToggleButton syncButton;
+    MainGuiPromptToggleButton midiButton;
 
     // 2 checkboxes: ALIGN, PDC
     juce::ToggleButton alignButton;
-    juce::ToggleButton pdcButton;
+    MainGuiPromptToggleButton pdcButton;
     juce::Label pdcDisplay;
 
-    juce::ToggleButton sidechainButton;
+    MainGuiPromptToggleButton sidechainButton;
     juce::Label sidechainDisplay;
 
     // Chaos buttons
-    juce::ToggleButton chaosFilterButton;
-    juce::ToggleButton chaosDelayButton;
+    MainGuiPromptToggleButton chaosFilterButton;
+    MainGuiPromptToggleButton chaosDelayButton;
     juce::Label chaosFilterDisplay;
     juce::Label chaosDelayDisplay;
 
@@ -555,6 +573,8 @@ private:
     juce::Rectangle<int> getAlignLabelArea() const;
     juce::Rectangle<int> getPdcLabelArea() const;
     juce::Rectangle<int> getSidechainLabelArea() const;
+    juce::Rectangle<int> getChaosFilterLabelArea() const;
+    juce::Rectangle<int> getChaosDelayLabelArea() const;
     juce::Rectangle<int> getInfoIconArea() const;
     void updateInfoIconCache();
     bool refreshLegendTextCache();

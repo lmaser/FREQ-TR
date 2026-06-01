@@ -1670,7 +1670,6 @@ void FREQTRAudioProcessorEditor::updatePdcTooltip()
 {
     const int maxWindow = getCurrentMaxHilbertWindow();
     const auto tooltip = formatPdcTooltip (pdcButton.getToggleState(), maxWindow);
-    pdcButton.setTooltip (tooltip);
     pdcDisplay.setTooltip (tooltip);
 }
 
@@ -5747,13 +5746,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     // CHSF label click → toggle (left), config (right)
     if (chaosFilterButton.isVisible())
     {
-        const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
-                                          (int) std::lround ((double) cachedVLayout_.box * 0.65));
-        const int labelX = chaosFilterButton.getX() + boxSide + 4 + 2;
-        const int labelR = chaosDelayButton.getX() - 6;
-        auto chsFArea = juce::Rectangle<int> (labelX, chaosFilterButton.getY(),
-                                               juce::jmax (0, labelR - labelX), cachedVLayout_.barH);
-        if (chsFArea.contains (pt) || chaosFilterDisplay.getBounds().contains (pt))
+        if (getChaosFilterLabelArea().contains (pt) || chaosFilterDisplay.getBounds().contains (pt))
         {
             if (e.mods.isPopupMenu())
                 openChaosFilterPrompt();
@@ -5766,13 +5759,7 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     // CHSD label click → toggle (left), config (right)
     if (chaosDelayButton.isVisible())
     {
-        const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
-                                          (int) std::lround ((double) cachedVLayout_.box * 0.65));
-        const int labelX = chaosDelayButton.getX() + boxSide + 4 + 2;
-        const int labelR = getWidth() - 6;
-        auto chsDArea = juce::Rectangle<int> (labelX, chaosDelayButton.getY(),
-                                               juce::jmax (0, labelR - labelX), cachedVLayout_.barH);
-        if (chsDArea.contains (pt) || chaosDelayDisplay.getBounds().contains (pt))
+        if (getChaosDelayLabelArea().contains (pt) || chaosDelayDisplay.getBounds().contains (pt))
         {
             if (e.mods.isPopupMenu())
                 openChaosDelayPrompt();
@@ -6118,6 +6105,30 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getPdcLabelArea() const
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getSidechainLabelArea() const
 {
     return makeToggleLabelArea (sidechainButton, getWidth() - kToggleLegendCollisionPadPx, "SIDECHAIN", "SC");
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getChaosFilterLabelArea() const
+{
+    if (chaosFilterButton.getWidth() <= 0 || chaosFilterButton.getHeight() <= 0)
+        return {};
+
+    const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
+                                      (int) std::lround ((double) cachedVLayout_.box * 0.65));
+    const int labelX = chaosFilterButton.getX() + boxSide + 4 + 2;
+    const int labelR = chaosDelayButton.getX() - 6;
+    return { labelX, chaosFilterButton.getY(), juce::jmax (0, labelR - labelX), cachedVLayout_.box };
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getChaosDelayLabelArea() const
+{
+    if (chaosDelayButton.getWidth() <= 0 || chaosDelayButton.getHeight() <= 0)
+        return {};
+
+    const int boxSide = juce::jlimit (14, juce::jmax (14, cachedVLayout_.box - 2),
+                                      (int) std::lround ((double) cachedVLayout_.box * 0.65));
+    const int labelX = chaosDelayButton.getX() + boxSide + 4 + 2;
+    const int labelR = getWidth() - 6;
+    return { labelX, chaosDelayButton.getY(), juce::jmax (0, labelR - labelX), cachedVLayout_.box };
 }
 
 juce::Rectangle<int> FREQTRAudioProcessorEditor::getInfoIconArea() const
@@ -6576,9 +6587,9 @@ void FREQTRAudioProcessorEditor::resized()
         const int chaosLeftW  = chaosRightX - horizontalLayout.leftX;
         const int chaosRightW = horizontalLayout.leftX + horizontalLayout.contentW - chaosRightX;
         chaosFilterButton.setBounds  (horizontalLayout.leftX, chaosY, chaosLeftW,  chaosH);
-        chaosFilterDisplay.setBounds (horizontalLayout.leftX, chaosY, chaosLeftW,  chaosH);
         chaosDelayButton.setBounds   (chaosRightX,            chaosY, chaosRightW, chaosH);
-        chaosDelayDisplay.setBounds  (chaosRightX,            chaosY, chaosRightW, chaosH);
+        chaosFilterDisplay.setBounds (getChaosFilterLabelArea());
+        chaosDelayDisplay.setBounds  (getChaosDelayLabelArea());
 
         modeInCombo.setVisible (true);
         modeOutCombo.setVisible (true);
@@ -6726,8 +6737,8 @@ void FREQTRAudioProcessorEditor::resized()
         midiChannelDisplay.setBounds (midiLabelRect);
     }
 
-    pdcDisplay.setBounds (pdcButton.getBounds().getUnion (getPdcLabelArea()));
-    sidechainDisplay.setBounds (sidechainButton.getBounds().getUnion (getSidechainLabelArea()));
+    pdcDisplay.setBounds (getPdcLabelArea());
+    sidechainDisplay.setBounds (getSidechainLabelArea());
     updateSidechainDependentControls();
 
     if (resizerCorner != nullptr)

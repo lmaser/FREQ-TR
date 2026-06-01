@@ -2084,6 +2084,9 @@ void FREQTRAudioProcessor::setStateInformation (const void* data, int sizeInByte
 			const auto restoredDelay = apvts.state.getProperty (UiStateKeys::midiDelayMs);
 			if (! restoredDelay.isVoid())
 				midiDelayMs.store (juce::jlimit (0, 100, (int) restoredDelay), std::memory_order_relaxed);
+
+			clearPendingMidiEvents();
+			clearMidiTrackingState();
 		}
 	}
 }

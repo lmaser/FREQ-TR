@@ -161,13 +161,13 @@ Enables sidechain carrier mode. Instead of the internal sine/harmonic oscillator
 - In RM mode, sidechain is used as the bipolar multiplier.
 - In FREQ SHIFT mode, sidechain is converted to a quadrature carrier through the same Hilbert window system, preserving sideband behavior.
 
-If the sidechain bus is not connected or contains no incoming audio, `SIDECHAIN` does not fall back to the internal oscillator; the wet path collapses to the aligned clean reference and feedback is suppressed.
+If the sidechain bus is not connected or contains no incoming audio, `SIDECHAIN` does not fall back to the internal oscillator; the wet path fades toward the aligned clean reference and feedback is progressively suppressed as carrier presence closes.
 
 Right-click `SIDECHAIN` to open its carrier prompt:
-- `TIME` ranges from `x0.00` to `x1.00`; default is `x0.25`. It controls sidechain entry/exit smoothing, partial carrier gain normalization response, and carrier inertia before AM/RM/frequency-shift processing.
-- `TONE` ranges from `250 Hz` to `5000 Hz`; default is `5000 Hz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
+- `TIME` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
+- `TONE` ranges from `250 Hz` to `20000 Hz`; default is `5000 Hz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
-The sidechain carrier path includes DC blocking, Butterworth tone conditioning, TIME-dependent carrier inertia, and partial automatic gain stabilization before Hilbert quadrature. In AM mode, sidechain level controls modulation depth rather than simply reducing the wet output level.
+The sidechain carrier path includes DC blocking, Butterworth tone conditioning, TIME-dependent carrier inertia, and Hilbert quadrature conversion. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level.
 
 ### POLARITY (-1 to +1)
 

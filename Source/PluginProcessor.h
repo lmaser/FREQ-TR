@@ -165,7 +165,7 @@ public:
 	static constexpr float kSidechainTimeMax     = 1.0f;
 	static constexpr float kSidechainTimeDefault = 0.25f;
 	static constexpr float kSidechainToneMin     = 250.0f;
-	static constexpr float kSidechainToneMax     = 5000.0f;
+	static constexpr float kSidechainToneMax     = 20000.0f;
 	static constexpr float kSidechainToneDefault = 5000.0f;
 
 	static constexpr float kMixMin     = 0.0f;

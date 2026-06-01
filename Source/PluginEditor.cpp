@@ -3877,6 +3877,36 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     auto* timeUnit = makeLabel ("sc_time_unit", "x");
     auto* toneUnit = makeLabel ("sc_tone_unit", "Hz");
 
+    auto formatSidechainPromptToneValue = [] (float hz)
+    {
+        const float clamped = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                            FREQTRAudioProcessor::kSidechainToneMax, hz);
+        if (clamped >= 1000.0f)
+            return juce::String (clamped / 1000.0f, 1);
+        return juce::String (juce::roundToInt (clamped));
+    };
+
+    auto updateTonePromptPresentation = [aw, toneUnit, formatSidechainPromptToneValue] (float toneHz, bool rewriteText)
+    {
+        if (toneUnit == nullptr)
+            return;
+
+        const float clamped = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                            FREQTRAudioProcessor::kSidechainToneMax, toneHz);
+        const bool useKhz = clamped >= 1000.0f;
+        toneUnit->setText (useKhz ? "kHz" : "Hz", juce::dontSendNotification);
+
+        if (auto* te = aw->getTextEditor ("tone"))
+        {
+            te->setInputFilter (new UnitInputFilter (useKhz ? 20.0f : FREQTRAudioProcessor::kSidechainToneMax,
+                                                     useKhz ? 4 : 5,
+                                                     useKhz),
+                               true);
+            if (rewriteText)
+                te->setText (formatSidechainPromptToneValue (clamped), juce::dontSendNotification);
+        }
+    };
+
     const float toneLogMin = std::log (FREQTRAudioProcessor::kSidechainToneMin);
     const float toneLogRange = std::log (FREQTRAudioProcessor::kSidechainToneMax) - toneLogMin;
     auto toneToBar = [toneLogMin, toneLogRange] (float hz)
@@ -3905,7 +3935,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     {
         te->setFont (f);
         te->applyFontToAllText (f);
-        te->setInputFilter (new UnitInputFilter (FREQTRAudioProcessor::kSidechainToneMax, 4, false), true);
+        updateTonePromptPresentation (currentTone, true);
     }
 
     auto syncing = std::make_shared<bool> (false);
@@ -3967,7 +3997,9 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         {
             const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
             const bool isToneRow = te == toneTe;
-            const int worstTextW = stringWidth (te->getFont(), isToneRow ? "5000" : "1.00");
+            const int worstTextW = stringWidth (te->getFont(), isToneRow
+                ? (unit->getText() == "kHz" ? "20.0" : "20000")
+                : "1.00");
             const int unitW = stringWidth (unit->getFont(), unit->getText()) + 4;
             const int idealEditorW = juce::jmax (36, juce::jmax (textW, worstTextW) + 10);
             const int maxEditorW = juce::jmax (36, contentW - maxLabelW - labelValueGap - unitGap - unitW);
@@ -4003,7 +4035,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         layoutRows();
     };
 
-    toneBar->onValueChanged = [aw, timeBar, syncing, layoutRows, pushSidechainValues, barToTone] (float value01)
+    toneBar->onValueChanged = [aw, timeBar, syncing, layoutRows, pushSidechainValues, barToTone, updateTonePromptPresentation] (float value01)
     {
         if (*syncing)
             return;
@@ -4012,11 +4044,9 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         const float toneHz = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
                                            FREQTRAudioProcessor::kSidechainToneMax,
                                            barToTone (value01));
+        updateTonePromptPresentation (toneHz, true);
         if (auto* te = aw->getTextEditor ("tone"))
-        {
-            te->setText (juce::String (juce::roundToInt (toneHz)), juce::sendNotification);
             te->selectAll();
-        }
         *syncing = false;
         pushSidechainValues (timeBar->value01, toneHz);
         layoutRows();
@@ -4041,7 +4071,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         };
 
     if (auto* te = aw->getTextEditor ("tone"))
-        te->onTextChange = [aw, timeBar, toneBar, syncing, layoutRows, pushSidechainValues, toneToBar]()
+        te->onTextChange = [aw, timeBar, toneBar, toneUnit, syncing, layoutRows, pushSidechainValues, toneToBar, updateTonePromptPresentation]()
         {
             if (*syncing)
                 return;
@@ -4049,9 +4079,13 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             *syncing = true;
             float nextTone = FREQTRAudioProcessor::kSidechainToneMin;
             if (auto* editor = aw->getTextEditor ("tone"))
+            {
+                const bool useKhz = (toneUnit != nullptr && toneUnit->getText() == "kHz");
                 nextTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
                                          FREQTRAudioProcessor::kSidechainToneMax,
-                                         editor->getText().getFloatValue());
+                                         editor->getText().getFloatValue() * (useKhz ? 1000.0f : 1.0f));
+                updateTonePromptPresentation (nextTone, true);
+            }
             toneBar->setValue (toneToBar (nextTone));
             *syncing = false;
             pushSidechainValues (timeBar->value01, nextTone);
@@ -4107,23 +4141,14 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
                 return;
             }
 
-            float newTime = savedTime;
-            float newTone = savedTone;
-            {
-                if (auto* te = aw->getTextEditor ("time"))
-                    newTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
-                                            FREQTRAudioProcessor::kSidechainTimeMax,
-                                            te->getText().getFloatValue());
-                if (auto* te = aw->getTextEditor ("tone"))
-                    newTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
-                                            FREQTRAudioProcessor::kSidechainToneMax,
-                                            te->getText().getFloatValue());
-
-                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTime))
-                    p->setValueNotifyingHost (p->convertTo0to1 (newTime));
-                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTone))
-                    p->setValueNotifyingHost (p->convertTo0to1 (newTone));
-            }
+            const float newTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
+                                                FREQTRAudioProcessor::kSidechainTimeMax,
+                                                safeThis->audioProcessor.apvts.getRawParameterValue (
+                                                    FREQTRAudioProcessor::kParamSidechainTime)->load());
+            const float newTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
+                                                FREQTRAudioProcessor::kSidechainToneMax,
+                                                safeThis->audioProcessor.apvts.getRawParameterValue (
+                                                    FREQTRAudioProcessor::kParamSidechainTone)->load());
 
             safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (newTime, newTone));
         }),

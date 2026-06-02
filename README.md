@@ -324,6 +324,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency
 - Added optional `SIDECHAIN` carrier mode with time/tone prompt
+- Extended `SIDECHAIN` TIME/TONE range and made sidechain frequency-shift direction follow `POLARITY`
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

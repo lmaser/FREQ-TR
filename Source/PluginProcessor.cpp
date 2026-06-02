@@ -1574,6 +1574,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float sidechainCarrierRealR = sidechainRealR * sidechainPolaritySign;
 				const float sidechainCarrierImagL = sidechainHilbL * sidechainPolaritySign;
 				const float sidechainCarrierImagR = sidechainHilbR * sidechainPolaritySign;
+				const float sidechainFreqShiftCosL = sidechainRealL;
+				const float sidechainFreqShiftCosR = sidechainRealR;
+				const float sidechainFreqShiftSinL = sidechainHilbL * sidechainPolaritySign;
+				const float sidechainFreqShiftSinR = sidechainHilbR * sidechainPolaritySign;
 				const auto makeDcSafeCarrier = [] (float carrier, float freqHz) noexcept
 				{
 					constexpr float kDcIdentityFadeHz = 0.25f;
@@ -1604,13 +1608,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float rmCarrierWaveL = carrierWaveL;
 				const float rmCarrierWaveR = carrierWaveR;
 
-				const float fsCosL = sidechainEnabled ? sidechainCarrierRealL : fsWaveCos;
-				const float fsSinL = sidechainEnabled ? sidechainCarrierImagL : fsWave;
+				const float fsCosL = sidechainEnabled ? sidechainFreqShiftCosL : fsWaveCos;
+				const float fsSinL = sidechainEnabled ? sidechainFreqShiftSinL : fsWave;
 				const float fsCosR = sidechainEnabled
-					? (style == 3 ? sidechainCarrierRealR : sidechainCarrierRealL)
+					? (style == 3 ? sidechainFreqShiftCosR : sidechainFreqShiftCosL)
 					: (style == 3 ? fsWaveCosR : fsWaveCos);
 				const float fsSinR = sidechainEnabled
-					? (style == 3 ? sidechainCarrierImagR : sidechainCarrierImagL)
+					? (style == 3 ? sidechainFreqShiftSinR : sidechainFreqShiftSinL)
 					: (style == 3 ? fsWaveR : fsWave);
 
 				const float amL = realL * amEnvelope (carrierWaveL, 1.0f);

@@ -4153,12 +4153,9 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         const int totalH = rowTotal * 2 + rowGap;
         const int rowY = juce::jmax (kPromptEditorMinTopPx, (buttonsTop - totalH) / 2);
 
-        const int contentPad = kPromptInnerMargin;
-        const int contentW = aw->getWidth() - contentPad * 2;
-        const int maxLabelW = juce::jmax (stringWidth (smoothLabel->getFont(), smoothLabel->getText()),
-                                          stringWidth (toneLabel->getFont(), toneLabel->getText())) + 8;
-        const int labelValueGap = juce::jmax (8, stringWidth (smoothTe->getFont(), " "));
-        const int unitGap = 2;
+        const int barX = kPromptInnerMargin;
+        const int barR = aw->getWidth() - kPromptInnerMargin;
+        constexpr int kToneLabelValueGapPx = 20;
 
         auto placeRow = [&] (juce::TextEditor* te, juce::Label* name, juce::Label* unit,
                              PromptBar* bar, int y)
@@ -4168,20 +4165,71 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             const int worstTextW = stringWidth (te->getFont(), isToneRow
                 ? (unit->getText() == "kHz" ? "20.0" : "20000")
                 : "1.00");
-            const int unitW = stringWidth (unit->getFont(), unit->getText()) + 4;
-            const int idealEditorW = juce::jmax (36, juce::jmax (textW, worstTextW) + 10);
-            const int maxEditorW = juce::jmax (36, contentW - maxLabelW - labelValueGap - unitGap - unitW);
-            const int editorW = juce::jmin (idealEditorW, maxEditorW);
-            const int visualW = maxLabelW + labelValueGap + editorW + unitGap + unitW;
-            const int availableShift = juce::jmax (0, contentW - visualW);
-            const int blockLeft = contentPad + (availableShift / 2);
+            const int labelW = stringWidth (name->getFont(), name->getText()) + 2;
+            const int unitTextW = stringWidth (unit->getFont(), unit->getText());
+            const int unitW = isToneRow ? (stringWidth (unit->getFont(), "kHz") + 4)
+                                        : (unitTextW + 2);
+            const int unitGap = isToneRow ? 2 : 0;
+            const int labelValueGap = isToneRow ? kToneLabelValueGapPx
+                                                : juce::jmax (2, stringWidth (te->getFont(), " "));
+            constexpr int kEditorTextPadPx = 14;
+            constexpr int kValueTextSafetyPx = 8;
+            constexpr int kMinEditorWidthPx = 24;
+            const int valueTextW = textW + kValueTextSafetyPx;
+            const int idealEditorW = isToneRow
+                ? juce::jmax (kMinEditorWidthPx,
+                              juce::jmax (valueTextW, worstTextW) + kEditorTextPadPx * 2)
+                : juce::jlimit (kMinEditorWidthPx, 88, valueTextW + kEditorTextPadPx * 2);
 
-            name->setBounds (blockLeft, y, maxLabelW, rowH);
-            auto textBounds = juce::Rectangle<int> (blockLeft + maxLabelW + labelValueGap, y, editorW, rowH);
-            te->setBounds (textBounds);
-            const int textRightX = textBounds.getX() + ((editorW - textW) / 2) + textW;
+            if (! isToneRow)
+            {
+                const int contentPad = kPromptInlineContentPadPx;
+                const int contentW = aw->getWidth() - contentPad * 2;
+                const int spaceW = juce::jmax (2, stringWidth (te->getFont(), " "));
+                const int editorW = idealEditorW;
+                const int visualW = labelW + spaceW + valueTextW + unitW;
+                const int centerX = contentPad + contentW / 2;
+                int blockLeft = centerX - visualW / 2;
+                blockLeft = juce::jlimit (contentPad,
+                                          juce::jmax (contentPad, contentPad + contentW - visualW),
+                                          blockLeft);
+
+                name->setBounds (blockLeft, y, labelW, rowH);
+
+                int editorX = blockLeft + labelW + spaceW - (editorW - valueTextW) / 2;
+                editorX = juce::jlimit (contentPad,
+                                        juce::jmax (contentPad, contentPad + contentW - editorW),
+                                        editorX);
+                te->setBounds (editorX, y, editorW, rowH);
+
+                const int textRightX = editorX + ((editorW - textW) / 2) + textW;
+                unit->setBounds (textRightX, y, unitW, rowH);
+                bar->setBounds (barX, y + rowH + barGap, barR - barX, barH);
+                return;
+            }
+
+            const int visualW = labelW + labelValueGap + textW + unitGap + unitTextW;
+            const int centerX = barX + (barR - barX) / 2;
+            int blockLeft = centerX - visualW / 2;
+            blockLeft = juce::jlimit (barX,
+                                      juce::jmax (barX, barR - visualW),
+                                      blockLeft);
+
+            const int nameX = blockLeft;
+            const int textLeft = blockLeft + labelW + labelValueGap;
+            const int maxEditorW = juce::jmax (kMinEditorWidthPx,
+                                               barR - textLeft - unitGap - unitW);
+            const int editorW = juce::jmin (idealEditorW, maxEditorW);
+            int editorX = textLeft - ((editorW - textW) / 2);
+            editorX = juce::jlimit (barX,
+                                    juce::jmax (barX, barR - editorW),
+                                    editorX);
+
+            te->setBounds (editorX, y, editorW, rowH);
+            const int textRightX = editorX + ((editorW - textW) / 2) + textW;
             unit->setBounds (textRightX + unitGap, y, unitW, rowH);
-            bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
+            name->setBounds (nameX, y, labelW, rowH);
+            bar->setBounds (barX, y + rowH + barGap, barR - barX, barH);
         };
 
         placeRow (smoothTe, smoothLabel, smoothUnit, smoothBar, rowY);

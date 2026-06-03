@@ -165,7 +165,7 @@ If the sidechain bus is not connected or contains no incoming audio, the sidecha
 
 Right-click `SIDECHAIN` to open its carrier prompt:
 - `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
-- `TONE` ranges from `250 Hz` to `20000 Hz`; default is `5000 Hz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
+- `TONE` ranges from `250 Hz` to `20 kHz`; default is `5 kHz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
 The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/carrier inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level.
 

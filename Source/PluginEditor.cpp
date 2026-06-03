@@ -4163,7 +4163,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             const int textW = juce::jmax (1, stringWidth (te->getFont(), te->getText()));
             const bool isToneRow = te == toneTe;
             const int worstTextW = stringWidth (te->getFont(), isToneRow
-                ? (unit->getText() == "kHz" ? "20.0" : "20000")
+                ? (unit->getText() == "kHz" ? "20.0" : "999")
                 : "1.00");
             const int labelW = stringWidth (name->getFont(), name->getText()) + 2;
             const int unitTextW = stringWidth (unit->getFont(), unit->getText());
@@ -4173,12 +4173,14 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             const int labelValueGap = isToneRow ? kToneLabelValueGapPx
                                                 : juce::jmax (2, stringWidth (te->getFont(), " "));
             constexpr int kEditorTextPadPx = 14;
+            constexpr int kToneEditorTextPadPx = 4;
             constexpr int kValueTextSafetyPx = 8;
             constexpr int kMinEditorWidthPx = 24;
             const int valueTextW = textW + kValueTextSafetyPx;
+            const int editorTextPadPx = isToneRow ? kToneEditorTextPadPx : kEditorTextPadPx;
             const int idealEditorW = isToneRow
                 ? juce::jmax (kMinEditorWidthPx,
-                              juce::jmax (valueTextW, worstTextW) + kEditorTextPadPx * 2)
+                              juce::jmax (valueTextW, worstTextW) + editorTextPadPx * 2)
                 : juce::jlimit (kMinEditorWidthPx, 88, valueTextW + kEditorTextPadPx * 2);
 
             if (! isToneRow)
@@ -4208,7 +4210,25 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
                 return;
             }
 
-            const int visualW = labelW + labelValueGap + textW + unitGap + unitTextW;
+            const int availableW = juce::jmax (1, barR - barX);
+            int effectiveLabelValueGap = labelValueGap;
+            int editorW = idealEditorW;
+            int visualW = labelW + effectiveLabelValueGap + editorW + unitGap + unitW;
+
+            if (visualW > availableW)
+            {
+                const int maxGap = availableW - labelW - editorW - unitGap - unitW;
+                effectiveLabelValueGap = juce::jmax (4, juce::jmin (effectiveLabelValueGap, maxGap));
+                visualW = labelW + effectiveLabelValueGap + editorW + unitGap + unitW;
+            }
+
+            if (visualW > availableW)
+            {
+                editorW = juce::jmax (kMinEditorWidthPx,
+                                      availableW - labelW - effectiveLabelValueGap - unitGap - unitW);
+                visualW = labelW + effectiveLabelValueGap + editorW + unitGap + unitW;
+            }
+
             const int centerX = barX + (barR - barX) / 2;
             int blockLeft = centerX - visualW / 2;
             blockLeft = juce::jlimit (barX,
@@ -4216,18 +4236,13 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
                                       blockLeft);
 
             const int nameX = blockLeft;
-            const int textLeft = blockLeft + labelW + labelValueGap;
-            const int maxEditorW = juce::jmax (kMinEditorWidthPx,
-                                               barR - textLeft - unitGap - unitW);
-            const int editorW = juce::jmin (idealEditorW, maxEditorW);
-            int editorX = textLeft - ((editorW - textW) / 2);
+            int editorX = blockLeft + labelW + effectiveLabelValueGap;
             editorX = juce::jlimit (barX,
                                     juce::jmax (barX, barR - editorW),
                                     editorX);
 
             te->setBounds (editorX, y, editorW, rowH);
-            const int textRightX = editorX + ((editorW - textW) / 2) + textW;
-            unit->setBounds (textRightX + unitGap, y, unitW, rowH);
+            unit->setBounds (editorX + editorW + unitGap, y, unitW, rowH);
             name->setBounds (nameX, y, labelW, rowH);
             bar->setBounds (barX, y + rowH + barGap, barR - barX, barH);
         };

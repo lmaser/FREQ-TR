@@ -79,7 +79,7 @@ Shift/modulation frequency. At 0 Hz the wet result collapses to the aligned inpu
 
 When MIDI is active, the effective frequency follows the incoming note. When SYNC is active, the effective frequency follows the selected DAW subdivision.
 
-When `SIDECHAIN` is active, the internal oscillator carrier is replaced by the sidechain input, so `FREQ`, `MOD`, `SYNC`, `MIDI`, and `HARM` are disabled in the UI.
+When `SIDECHAIN` is active, the external input drives the modulation path, so `FREQ`, `MOD`, `SYNC`, and `MIDI` are disabled in the UI. In FREQ SHIFT mode, the `HARM` row becomes `SHADOW`, a sidechain frequency-shift texture blend.
 
 ### FREQ SYNC
 
@@ -155,19 +155,21 @@ This affects both AM and frequency-shift behavior. At low values the modulation 
 
 ### SIDECHAIN
 
-Enables sidechain carrier mode. Instead of the internal sine/harmonic oscillator, the plugin uses the optional sidechain audio input as the modulation carrier.
+Enables sidechain carrier mode. Instead of relying only on the internal sine/harmonic oscillator, the plugin uses the optional sidechain audio input to drive the modulation path.
 
 - In AM mode, sidechain drives the unipolar amplitude envelope.
 - In RM mode, sidechain is used as the bipolar multiplier.
-- In FREQ SHIFT mode, sidechain is converted to a quadrature carrier through the same Hilbert window system, preserving sideband behavior.
+- In FREQ SHIFT mode, sidechain drives the shift amount and can add the `SHADOW` Hilbert/quadrature sidechain texture.
 
-If the sidechain bus is not connected or contains no incoming audio, `SIDECHAIN` does not fall back to the internal oscillator; the wet path fades toward the aligned clean reference and feedback is progressively suppressed as carrier presence closes.
+If the sidechain bus is not connected or contains no incoming audio, the sidechain-controlled wet contribution closes toward the aligned clean reference. FREQ SHIFT keeps the internal frequency-shift path available while sidechain depth and `SHADOW` close with detector presence.
 
 Right-click `SIDECHAIN` to open its carrier prompt:
-- `TIME` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
+- `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
 - `TONE` ranges from `250 Hz` to `20000 Hz`; default is `5000 Hz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
-The sidechain carrier path includes DC blocking, Butterworth tone conditioning, TIME-dependent carrier inertia, and Hilbert quadrature conversion. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level.
+The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/carrier inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level.
+
+In FREQ SHIFT sidechain mode, the disabled `HARM` row becomes `SHADOW` (`SHD` in compact text). `SHADOW` ranges from `0%` to `100%`, defaults to `100%`, and blends the direct sidechain-controlled shifter with the more imprint-like Hilbert/quadrature sidechain texture.
 
 ### POLARITY (-1 to +1)
 
@@ -282,7 +284,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Hilbert transform: selectable 127 / 255 / 511 / 1023 / 2047-tap odd-length FIR with Blackman windowing
 - Real path: matched to the selected maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
-- Sidechain carrier: optional external audio carrier with time/tone controls and Hilbert quadrature for frequency-shift operation
+- Sidechain carrier: optional external audio carrier with smooth/tone controls and optional `SHADOW` Hilbert quadrature texture for frequency-shift operation
 - Harmonic cap: 16 partials total, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
@@ -323,8 +325,9 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added AM -> RM -> FREQ SHIFT engine mapping
 - Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency
-- Added optional `SIDECHAIN` carrier mode with time/tone prompt
-- Extended `SIDECHAIN` TIME/TONE range and made sidechain frequency-shift direction follow `POLARITY`
+- Added optional `SIDECHAIN` carrier mode with smooth/tone prompt
+- Extended `SIDECHAIN` SMOOTH/TONE range and made sidechain frequency-shift direction follow `POLARITY`
+- Added `SHADOW` blend for FREQ SHIFT sidechain texture
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

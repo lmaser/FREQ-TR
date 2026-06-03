@@ -33,8 +33,9 @@ public:
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
 	static constexpr const char* kParamSidechain = "sidechain";
-	static constexpr const char* kParamSidechainTime = "sidechain_time";
+	static constexpr const char* kParamSidechainSmooth = "sidechain_time";
 	static constexpr const char* kParamSidechainTone = "sidechain_tone";
+	static constexpr const char* kParamSidechainShadow = "sidechain_shadow";
 
 	static constexpr const char* kParamFilterHpFreq  = "filter_hp_freq";
 	static constexpr const char* kParamFilterLpFreq  = "filter_lp_freq";
@@ -87,6 +88,7 @@ public:
 	// Parameter ranges and defaults
 	static constexpr float kFreqMin     =  0.0f;
 	static constexpr float kFreqMax     =  5000.0f;
+	static constexpr float kSidechainFreqShiftMax = 10000.0f;
 	static constexpr float kFreqDefault =  0.0f;
 	static constexpr float kFreqSkew    =  0.22307028f; // 10 Hz at 25% of the manual range.
 
@@ -161,12 +163,15 @@ public:
 	static constexpr float kPolarityMax     =  1.0f;
 	static constexpr float kPolarityDefault =  1.0f;
 
-	static constexpr float kSidechainTimeMin     = 0.0f;
-	static constexpr float kSidechainTimeMax     = 1.0f;
-	static constexpr float kSidechainTimeDefault = 0.25f;
+	static constexpr float kSidechainSmoothMin     = 0.0f;
+	static constexpr float kSidechainSmoothMax     = 1.0f;
+	static constexpr float kSidechainSmoothDefault = 0.25f;
 	static constexpr float kSidechainToneMin     = 250.0f;
 	static constexpr float kSidechainToneMax     = 20000.0f;
 	static constexpr float kSidechainToneDefault = 5000.0f;
+	static constexpr float kSidechainShadowMin     = 0.0f;
+	static constexpr float kSidechainShadowMax     = 1.0f;
+	static constexpr float kSidechainShadowDefault = 1.0f;
 
 	static constexpr float kMixMin     = 0.0f;
 	static constexpr float kMixMax     = 1.0f;
@@ -323,7 +328,8 @@ private:
 	// At 0 Hz shift the output equals the delayed input exactly.
 	std::vector<float> hilbertBufL, hilbertBufR;       // circular FIR input buffers
 	std::vector<float> cleanDelayBufL, cleanDelayBufR; // feedback-free delay for dry ref
-	std::vector<float> sidechainHilbertBufL, sidechainHilbertBufR;
+	std::vector<float> effectInputBufL, effectInputBufR; // pre-feedback input for sidechain-only modulation
+	std::vector<float> sidechainModBufL, sidechainModBufR; // delayed external AM/RM modulator
 	int hilbertPos = 0;                                // write position in circular buffers
 
 	// Folded Hilbert taps: exploit antisymmetry + zero-skip.
@@ -338,6 +344,7 @@ private:
 	int hilbertWindowCrossfadeRemaining_ = 0;
 	int hilbertWindowCrossfadeTotal_ = 0;
 	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
+	float hilbertFeedbackCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
 
 	struct FreqShiftAllpassSection
 	{
@@ -463,6 +470,8 @@ private:
 	float smoothedOutputGain = 1.0f; // EMA-smoothed output gain (linear)
 	float smoothedPan = kPanDefault;
 	float smoothedLimThreshold = 1.0f;
+	float smoothedPolarity_ = kPolarityDefault;
+	float smoothedSidechainPolaritySign_ = 1.0f;
 	float sidechainDcPrevInL_ = 0.0f;
 	float sidechainDcPrevInR_ = 0.0f;
 	float sidechainDcPrevOutL_ = 0.0f;
@@ -487,9 +496,12 @@ private:
 	SidechainToneFilterState sidechainToneFilterR_;
 	float sidechainCarrierSmoothL_ = 0.0f;
 	float sidechainCarrierSmoothR_ = 0.0f;
+	float sidechainFreqShiftSmoothL_ = 0.0f;
+	float sidechainFreqShiftSmoothR_ = 0.0f;
 	float sidechainRmsEnv_ = 0.0f;
 	float sidechainGateSmoothed_ = 0.0f;
 	float sidechainDepthSmoothed_ = 0.0f;
+	float smoothedSidechainShadow_ = kSidechainShadowDefault;
 
 	// ── Feedback state ──
 	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;
@@ -604,8 +616,9 @@ private:
 		}
 	}
 	std::atomic<float>* sidechainParam = nullptr;
-	std::atomic<float>* sidechainTimeParam = nullptr;
+	std::atomic<float>* sidechainSmoothParam = nullptr;
 	std::atomic<float>* sidechainToneParam = nullptr;
+	std::atomic<float>* sidechainShadowParam = nullptr;
 	std::atomic<float>* filterHpFreqParam  = nullptr;
 	std::atomic<float>* filterLpFreqParam  = nullptr;
 	std::atomic<float>* filterHpSlopeParam = nullptr;

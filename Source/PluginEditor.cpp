@@ -125,9 +125,9 @@ static juce::String formatSidechainToneText (float hz)
     return juce::String (juce::roundToInt (clamped)) + "Hz";
 }
 
-static juce::String formatSidechainTooltip (float time, float tone)
+static juce::String formatSidechainTooltip (float smooth, float tone)
 {
-    return "TIME x" + juce::String (juce::jlimit (0.0f, 1.0f, time), 2)
+    return "SMOOTH x" + juce::String (juce::jlimit (0.0f, 1.0f, smooth), 2)
          + " | TONE " + formatSidechainToneText (tone);
 }
 
@@ -835,6 +835,11 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
         addAndMakeVisible (*slider);
         slider->addListener (this);
     }
+    sidechainShadowSlider.setOwner (this);
+    setupBar (sidechainShadowSlider);
+    addAndMakeVisible (sidechainShadowSlider);
+    sidechainShadowSlider.addListener (this);
+    sidechainShadowSlider.setVisible (false);
 
     freqSlider.setNumDecimalPlacesToDisplay (1);
     modSlider.setNumDecimalPlacesToDisplay (2);
@@ -848,6 +853,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
                            1.0);
     styleSlider.setNumDecimalPlacesToDisplay (0);
     harmSlider.setNumDecimalPlacesToDisplay (1);
+    sidechainShadowSlider.setNumDecimalPlacesToDisplay (1);
     polaritySlider.setNumDecimalPlacesToDisplay (2);
     mixSlider.setNumDecimalPlacesToDisplay (1);
     inputSlider.setNumDecimalPlacesToDisplay (1);
@@ -1023,7 +1029,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     sidechainDisplay.setInterceptsMouseClicks (true, false);
     sidechainDisplay.addMouseListener (this, false);
     sidechainDisplay.setTooltip (formatSidechainTooltip (
-        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainTime)->load(),
+        audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainSmooth)->load(),
         audioProcessor.apvts.getRawParameterValue (FREQTRAudioProcessor::kParamSidechainTone)->load()));
     sidechainDisplay.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     sidechainDisplay.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
@@ -1048,6 +1054,7 @@ FREQTRAudioProcessorEditor::FREQTRAudioProcessorEditor (FREQTRAudioProcessor& p)
     bindSlider (windowAttachment,  FREQTRAudioProcessor::kParamWindow,  windowSlider,  (double) FREQTRAudioProcessor::kHilbertWindowDefault);
     bindSlider (styleAttachment,   FREQTRAudioProcessor::kParamStyle,   styleSlider,   (double) FREQTRAudioProcessor::kStyleDefault);
     bindSlider (harmAttachment,    FREQTRAudioProcessor::kParamHarm,    harmSlider,    (double) FREQTRAudioProcessor::kHarmDefault);
+    bindSlider (sidechainShadowAttachment, FREQTRAudioProcessor::kParamSidechainShadow, sidechainShadowSlider, (double) FREQTRAudioProcessor::kSidechainShadowDefault);
     bindSlider (polarityAttachment, FREQTRAudioProcessor::kParamPolarity, polaritySlider, kDefaultPolarity);
     bindSlider (mixAttachment,      FREQTRAudioProcessor::kParamMix,     mixSlider,     (double) FREQTRAudioProcessor::kMixDefault);
     bindSlider (inputAttachment,    FREQTRAudioProcessor::kParamInput,   inputSlider,   (double) FREQTRAudioProcessor::kInputDefault);
@@ -1151,6 +1158,7 @@ FREQTRAudioProcessorEditor::~FREQTRAudioProcessorEditor()
     const std::array<BarSlider*, 16> barSliders { &inputSlider, &outputSlider, &mixSlider, &freqSlider, &modSlider, &combSlider, &feedbackSlider, &engineSlider, &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider, &panSlider, &limThresholdSlider };
     for (auto* slider : barSliders)
         slider->removeListener (this);
+    sidechainShadowSlider.removeListener (this);
 
     if (tooltipWindow != nullptr)
         tooltipWindow->setLookAndFeel (nullptr);
@@ -1212,6 +1220,7 @@ void FREQTRAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
     {
         return s == &freqSlider || s == &modSlider || s == &feedbackSlider || s == &jitterSlider || s == &combSlider
             || s == &engineSlider || s == &windowSlider || s == &styleSlider || s == &harmSlider || s == &polaritySlider
+            || s == &sidechainShadowSlider
             || s == &inputSlider || s == &outputSlider || s == &tiltSlider || s == &panSlider || s == &mixSlider
             || s == &limThresholdSlider;
     };
@@ -1323,6 +1332,9 @@ void FREQTRAudioProcessorEditor::parameterChanged (const juce::String& parameter
         {
             if (safeThis == nullptr) return;
             safeThis->updateSidechainDependentControls();
+            safeThis->refreshLegendTextCache();
+            safeThis->updateCachedLayout();
+            safeThis->repaint();
         });
         return;
     }
@@ -1418,7 +1430,8 @@ void FREQTRAudioProcessorEditor::timerCallback()
                                     || jitterSlider.isMouseButtonDown()
                                     || engineSlider.isMouseButtonDown()
                                     || styleSlider.isMouseButtonDown()
-        || harmSlider.isMouseButtonDown()
+                                    || harmSlider.isMouseButtonDown()
+                                    || sidechainShadowSlider.isMouseButtonDown()
                                     || polaritySlider.isMouseButtonDown()
                                     || mixSlider.isMouseButtonDown()
                                     || inputSlider.isMouseButtonDown()
@@ -1684,6 +1697,7 @@ void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
     freqSlider.setAlpha (carrierAlpha);
     modSlider.setAlpha (carrierAlpha);
     harmSlider.setAlpha (carrierAlpha);
+    sidechainShadowSlider.setAlpha (1.0f);
     syncButton.setAlpha (carrierAlpha);
     midiButton.setAlpha (carrierAlpha);
     retrigDisplay.setAlpha (carrierAlpha);
@@ -1691,9 +1705,27 @@ void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
 
     freqSlider.setEnabled (! sidechainOn);
     modSlider.setEnabled (! sidechainOn);
-    harmSlider.setEnabled (! sidechainOn);
+    const bool showShadow = sidechainOn && ! ioSectionExpanded_ && harmSlider.getWidth() > 0 && harmSlider.getHeight() > 0;
+    if (showShadow)
+    {
+        sidechainShadowSlider.setBounds (harmSlider.getBounds());
+        sidechainShadowSlider.setVisible (true);
+        sidechainShadowSlider.setEnabled (true);
+        harmSlider.setVisible (false);
+        harmSlider.setEnabled (false);
+    }
+    else
+    {
+        sidechainShadowSlider.setVisible (false);
+        sidechainShadowSlider.setEnabled (false);
+        if (! ioSectionExpanded_ && harmSlider.getWidth() > 0 && harmSlider.getHeight() > 0)
+            harmSlider.setVisible (true);
+        harmSlider.setEnabled (! sidechainOn);
+    }
     syncButton.setEnabled (! sidechainOn);
     midiButton.setEnabled (! sidechainOn);
+    retrigDisplay.setEnabled (! sidechainOn);
+    midiChannelDisplay.setEnabled (! sidechainOn);
 
     repaint();
 }
@@ -1780,6 +1812,18 @@ juce::String FREQTRAudioProcessorEditor::getHarmTextShort() const
 {
     const int pct = juce::roundToInt ((float) harmSlider.getValue() * 100.0f);
     return juce::String (pct) + "% HRM";
+}
+
+juce::String FREQTRAudioProcessorEditor::getSidechainShadowText() const
+{
+    const int pct = juce::roundToInt ((float) sidechainShadowSlider.getValue() * 100.0f);
+    return juce::String (pct) + "% SHADOW";
+}
+
+juce::String FREQTRAudioProcessorEditor::getSidechainShadowTextShort() const
+{
+    const int pct = juce::roundToInt ((float) sidechainShadowSlider.getValue() * 100.0f);
+    return juce::String (pct) + "% SHD";
 }
 
 juce::String FREQTRAudioProcessorEditor::getPolarityText() const
@@ -2053,7 +2097,9 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
 
     if (sidechainOn)
     {
-        setLabelOnly (cachedHarmTextFull, cachedHarmTextShort, cachedHarmIntOnly, "HARM");
+        cachedHarmTextFull = getSidechainShadowText();
+        cachedHarmTextShort = getSidechainShadowTextShort();
+        cachedHarmIntOnly = cachedHarmTextShort;
     }
 
     if (! freqShiftActive)
@@ -2536,6 +2582,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     else if (&s == &combSlider)      { suffix = " Hz";         suffixShort = " Hz"; }
     else if (&s == &engineSlider)    { suffix = " % ENGINE";   suffixShort = " % ENG"; }
     else if (&s == &harmSlider)      { suffix = " % HARM";     suffixShort = " % HARM"; }
+    else if (&s == &sidechainShadowSlider) { suffix = " % SHADOW";   suffixShort = " % SHD"; }
     else if (&s == &polaritySlider)  { suffix = " POLARITY";   suffixShort = " POL"; }
     else if (&s == &mixSlider)       { suffix = " % MIX";      suffixShort = " % MIX"; }
     else if (&s == &panSlider)       { suffix = " % PAN";      suffixShort = " % PAN"; }
@@ -2546,7 +2593,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
     const juce::String prefixText = prefix.trim();
     const juce::String suffixText = suffix.trimStart();
     const juce::String suffixTextShort = suffixShort.trimStart();
-    const bool isPercentPrompt = (&s == &engineSlider || &s == &harmSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &jitterSlider || &s == &panSlider);
+    const bool isPercentPrompt = (&s == &engineSlider || &s == &harmSlider || &s == &sidechainShadowSlider || &s == &mixSlider || &s == &feedbackSlider || &s == &jitterSlider || &s == &panSlider);
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
@@ -3001,6 +3048,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                 // Percent input maps to normalized slider units; FBK intentionally supports -100..+100.
                 if (safeThis != nullptr && (sliderPtr == &safeThis->engineSlider
                                          || sliderPtr == &safeThis->harmSlider
+                                         || sliderPtr == &safeThis->sidechainShadowSlider
                                          || sliderPtr == &safeThis->mixSlider
                                          || sliderPtr == &safeThis->feedbackSlider
                                          || sliderPtr == &safeThis->jitterSlider
@@ -3867,10 +3915,10 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     lnf.setScheme (activeScheme);
     const auto scheme = activeScheme;
 
-    const float currentTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
-                                            FREQTRAudioProcessor::kSidechainTimeMax,
+    const float currentSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                            FREQTRAudioProcessor::kSidechainSmoothMax,
                                             audioProcessor.apvts.getRawParameterValue (
-                                                FREQTRAudioProcessor::kParamSidechainTime)->load());
+                                                FREQTRAudioProcessor::kParamSidechainSmooth)->load());
     const float currentTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
                                             FREQTRAudioProcessor::kSidechainToneMax,
                                             audioProcessor.apvts.getRawParameterValue (
@@ -3878,7 +3926,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
-    aw->addTextEditor ("time", juce::String (currentTime, 2), juce::String());
+    aw->addTextEditor ("smooth", juce::String (currentSmooth, 2), juce::String());
     aw->addTextEditor ("tone", juce::String (juce::roundToInt (currentTone)), juce::String());
 
     struct PromptBar : public juce::Component
@@ -3992,9 +4040,9 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         return l;
     };
 
-    auto* timeLabel = makeLabel ("sc_time_label", "TIME");
+    auto* smoothLabel = makeLabel ("sc_smooth_label", "SMOOTH");
     auto* toneLabel = makeLabel ("sc_tone_label", "TONE");
-    auto* timeUnit = makeLabel ("sc_time_unit", "x");
+    auto* smoothUnit = makeLabel ("sc_smooth_unit", "x");
     auto* toneUnit = makeLabel ("sc_tone_unit", "Hz");
 
     auto formatSidechainPromptToneValue = [] (float hz)
@@ -4040,12 +4088,12 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         return std::exp (toneLogMin + juce::jlimit (0.0f, 1.0f, value01) * toneLogRange);
     };
 
-    auto* timeBar = new PromptBar (scheme, currentTime, FREQTRAudioProcessor::kSidechainTimeDefault);
+    auto* smoothBar = new PromptBar (scheme, currentSmooth, FREQTRAudioProcessor::kSidechainSmoothDefault);
     auto* toneBar = new PromptBar (scheme, toneToBar (currentTone), toneToBar (FREQTRAudioProcessor::kSidechainToneDefault));
-    aw->addAndMakeVisible (timeBar);
+    aw->addAndMakeVisible (smoothBar);
     aw->addAndMakeVisible (toneBar);
 
-    if (auto* te = aw->getTextEditor ("time"))
+    if (auto* te = aw->getTextEditor ("smooth"))
     {
         te->setFont (f);
         te->applyFontToAllText (f);
@@ -4070,33 +4118,33 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             p->setValueNotifyingHost (p->convertTo0to1 (plainValue));
     };
 
-    auto pushSidechainValues = [safeThis, setSidechainParam] (float time, float tone)
+    auto pushSidechainValues = [safeThis, setSidechainParam] (float smooth, float tone)
     {
-        const float clampedTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
-                                                FREQTRAudioProcessor::kSidechainTimeMax, time);
+        const float clampedSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                                FREQTRAudioProcessor::kSidechainSmoothMax, smooth);
         const float clampedTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
                                                 FREQTRAudioProcessor::kSidechainToneMax, tone);
 
-        setSidechainParam (FREQTRAudioProcessor::kParamSidechainTime, clampedTime);
+        setSidechainParam (FREQTRAudioProcessor::kParamSidechainSmooth, clampedSmooth);
         setSidechainParam (FREQTRAudioProcessor::kParamSidechainTone, clampedTone);
 
         if (safeThis != nullptr)
-            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (clampedTime, clampedTone));
+            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (clampedSmooth, clampedTone));
     };
 
-    auto layoutRows = [aw, timeLabel, toneLabel, timeUnit, toneUnit, timeBar, toneBar]()
+    auto layoutRows = [aw, smoothLabel, toneLabel, smoothUnit, toneUnit, smoothBar, toneBar]()
     {
-        auto* timeTe = aw->getTextEditor ("time");
+        auto* smoothTe = aw->getTextEditor ("smooth");
         auto* toneTe = aw->getTextEditor ("tone");
-        if (timeTe == nullptr || toneTe == nullptr
-            || timeLabel == nullptr || toneLabel == nullptr
-            || timeUnit == nullptr || toneUnit == nullptr
-            || timeBar == nullptr || toneBar == nullptr)
+        if (smoothTe == nullptr || toneTe == nullptr
+            || smoothLabel == nullptr || toneLabel == nullptr
+            || smoothUnit == nullptr || toneUnit == nullptr
+            || smoothBar == nullptr || toneBar == nullptr)
             return;
 
         const int buttonsTop = getAlertButtonsTop (*aw);
-        auto er = timeTe->getBounds();
-        er.setHeight ((int) (timeTe->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
+        auto er = smoothTe->getBounds();
+        er.setHeight ((int) (smoothTe->getFont().getHeight() * kPromptEditorHeightScale) + kPromptEditorHeightPadPx);
         const int rowH = er.getHeight();
         const int barH = juce::jmax (12, rowH / 2);
         const int barGap = juce::jmax (4, rowH / 4);
@@ -4107,9 +4155,9 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
         const int contentPad = kPromptInnerMargin;
         const int contentW = aw->getWidth() - contentPad * 2;
-        const int maxLabelW = juce::jmax (stringWidth (timeLabel->getFont(), timeLabel->getText()),
+        const int maxLabelW = juce::jmax (stringWidth (smoothLabel->getFont(), smoothLabel->getText()),
                                           stringWidth (toneLabel->getFont(), toneLabel->getText())) + 8;
-        const int labelValueGap = juce::jmax (8, stringWidth (timeTe->getFont(), " "));
+        const int labelValueGap = juce::jmax (8, stringWidth (smoothTe->getFont(), " "));
         const int unitGap = 2;
 
         auto placeRow = [&] (juce::TextEditor* te, juce::Label* name, juce::Label* unit,
@@ -4136,17 +4184,17 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
         };
 
-        placeRow (timeTe, timeLabel, timeUnit, timeBar, rowY);
+        placeRow (smoothTe, smoothLabel, smoothUnit, smoothBar, rowY);
         placeRow (toneTe, toneLabel, toneUnit, toneBar, rowY + rowTotal + rowGap);
     };
 
-    timeBar->onValueChanged = [aw, toneBar, syncing, layoutRows, pushSidechainValues, barToTone] (float value01)
+    smoothBar->onValueChanged = [aw, toneBar, syncing, layoutRows, pushSidechainValues, barToTone] (float value01)
     {
         if (*syncing)
             return;
 
         *syncing = true;
-        if (auto* te = aw->getTextEditor ("time"))
+        if (auto* te = aw->getTextEditor ("smooth"))
         {
             te->setText (juce::String (value01, 2), juce::sendNotification);
             te->selectAll();
@@ -4156,7 +4204,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         layoutRows();
     };
 
-    toneBar->onValueChanged = [aw, timeBar, syncing, layoutRows, pushSidechainValues, barToTone, updateTonePromptPresentation] (float value01)
+    toneBar->onValueChanged = [aw, smoothBar, syncing, layoutRows, pushSidechainValues, barToTone, updateTonePromptPresentation] (float value01)
     {
         if (*syncing)
             return;
@@ -4169,30 +4217,30 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         if (auto* te = aw->getTextEditor ("tone"))
             te->selectAll();
         *syncing = false;
-        pushSidechainValues (timeBar->value01, toneHz);
+        pushSidechainValues (smoothBar->value01, toneHz);
         layoutRows();
     };
 
-    if (auto* te = aw->getTextEditor ("time"))
-        te->onTextChange = [aw, timeBar, toneBar, syncing, layoutRows, pushSidechainValues, barToTone]()
+    if (auto* te = aw->getTextEditor ("smooth"))
+        te->onTextChange = [aw, smoothBar, toneBar, syncing, layoutRows, pushSidechainValues, barToTone]()
         {
             if (*syncing)
                 return;
 
             *syncing = true;
-            float nextTime = FREQTRAudioProcessor::kSidechainTimeMin;
-            if (auto* editor = aw->getTextEditor ("time"))
-                nextTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
-                                         FREQTRAudioProcessor::kSidechainTimeMax,
+            float nextSmooth = FREQTRAudioProcessor::kSidechainSmoothMin;
+            if (auto* editor = aw->getTextEditor ("smooth"))
+                nextSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                         FREQTRAudioProcessor::kSidechainSmoothMax,
                                          editor->getText().getFloatValue());
-            timeBar->setValue (nextTime);
+            smoothBar->setValue (nextSmooth);
             *syncing = false;
-            pushSidechainValues (nextTime, barToTone (toneBar->value01));
+            pushSidechainValues (nextSmooth, barToTone (toneBar->value01));
             layoutRows();
         };
 
     if (auto* te = aw->getTextEditor ("tone"))
-        te->onTextChange = [aw, timeBar, toneBar, toneUnit, syncing, layoutRows, pushSidechainValues, toneToBar, updateTonePromptPresentation]()
+        te->onTextChange = [aw, smoothBar, toneBar, toneUnit, syncing, layoutRows, pushSidechainValues, toneToBar, updateTonePromptPresentation]()
         {
             if (*syncing)
                 return;
@@ -4209,7 +4257,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             }
             toneBar->setValue (toneToBar (nextTone));
             *syncing = false;
-            pushSidechainValues (timeBar->value01, nextTone);
+            pushSidechainValues (smoothBar->value01, nextTone);
             layoutRows();
         };
 
@@ -4217,7 +4265,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     aw->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
     applyPromptShellSize (*aw);
     layoutAlertWindowButtons (*aw);
-    preparePromptTextEditor (*aw, "time", scheme.bg, scheme.text, scheme.fg, f, false);
+    preparePromptTextEditor (*aw, "smooth", scheme.bg, scheme.text, scheme.fg, f, false);
     preparePromptTextEditor (*aw, "tone", scheme.bg, scheme.text, scheme.fg, f, false);
     layoutRows();
     styleAlertButtons (*aw, lnf);
@@ -4242,7 +4290,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
     aw->enterModalState (true,
         juce::ModalCallbackFunction::create (
-            [safeThis, aw, savedTime = currentTime, savedTone = currentTone] (int result) mutable
+            [safeThis, aw, savedSmooth = currentSmooth, savedTone = currentTone] (int result) mutable
         {
             std::unique_ptr<juce::AlertWindow> killer (aw);
 
@@ -4254,24 +4302,24 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
             if (result != 1)
             {
-                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTime))
-                    p->setValueNotifyingHost (p->convertTo0to1 (savedTime));
+                if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainSmooth))
+                    p->setValueNotifyingHost (p->convertTo0to1 (savedSmooth));
                 if (auto* p = safeThis->audioProcessor.apvts.getParameter (FREQTRAudioProcessor::kParamSidechainTone))
                     p->setValueNotifyingHost (p->convertTo0to1 (savedTone));
-                safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (savedTime, savedTone));
+                safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (savedSmooth, savedTone));
                 return;
             }
 
-            const float newTime = juce::jlimit (FREQTRAudioProcessor::kSidechainTimeMin,
-                                                FREQTRAudioProcessor::kSidechainTimeMax,
+            const float newSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                                                FREQTRAudioProcessor::kSidechainSmoothMax,
                                                 safeThis->audioProcessor.apvts.getRawParameterValue (
-                                                    FREQTRAudioProcessor::kParamSidechainTime)->load());
+                                                    FREQTRAudioProcessor::kParamSidechainSmooth)->load());
             const float newTone = juce::jlimit (FREQTRAudioProcessor::kSidechainToneMin,
                                                 FREQTRAudioProcessor::kSidechainToneMax,
                                                 safeThis->audioProcessor.apvts.getRawParameterValue (
                                                     FREQTRAudioProcessor::kParamSidechainTone)->load());
 
-            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (newTime, newTone));
+            safeThis->sidechainDisplay.setTooltip (formatSidechainTooltip (newSmooth, newTone));
         }),
         false);
 }
@@ -6072,9 +6120,11 @@ void FREQTRAudioProcessorEditor::updateCachedLayout()
     cachedHLayout_ = buildHorizontalLayout (getWidth(), getTargetValueColumnWidth());
     cachedVLayout_ = buildVerticalLayout (getHeight(), kLayoutVerticalBiasPx, ioSectionExpanded_);
 
+    const juce::Slider* harmRowSlider = sidechainShadowSlider.isVisible() ? static_cast<const juce::Slider*> (&sidechainShadowSlider)
+                                                                          : static_cast<const juce::Slider*> (&harmSlider);
     const juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                                &freqSlider, &modSlider, &combSlider, &feedbackSlider, &engineSlider,
-        &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
+        &windowSlider, harmRowSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
     {
@@ -6184,6 +6234,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "100% RM|FS ENGINE",
         "2048 WINDOW",
         "STEREO STYLE", "DUAL STYLE",
+        "100% SHADOW",
         "100% HARM",
         "100% HRM",
         "-1.00 POLARITY",
@@ -6214,9 +6265,11 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getValueAreaFor (const juce::Re
 
 juce::Slider* FREQTRAudioProcessorEditor::getSliderForValueAreaPoint (juce::Point<int> p)
 {
+    juce::Slider* harmRowSlider = sidechainShadowSlider.isVisible() ? static_cast<juce::Slider*> (&sidechainShadowSlider)
+                                                                    : static_cast<juce::Slider*> (&harmSlider);
     juce::Slider* sliders[kNumBars] = { &inputSlider, &outputSlider, &mixSlider,
                                          &freqSlider, &modSlider, &combSlider, &feedbackSlider, &engineSlider,
-        &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
+        &windowSlider, harmRowSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider };
 
     for (int i = 0; i < kNumBars; ++i)
         if (cachedValueAreas_[(size_t) i].contains (p))
@@ -6493,10 +6546,12 @@ void FREQTRAudioProcessorEditor::paint (juce::Graphics& g)
             &cachedStyleIntOnly,
             &cachedTiltIntOnly
         };
+        const juce::Slider* harmRowSlider = sidechainShadowSlider.isVisible() ? static_cast<const juce::Slider*> (&sidechainShadowSlider)
+                                                                              : static_cast<const juce::Slider*> (&harmSlider);
         const juce::Slider* sliders[kNumBars] = {
             &inputSlider, &outputSlider, &mixSlider,
             &freqSlider, &modSlider, &combSlider, &feedbackSlider, &engineSlider,
-            &windowSlider, &harmSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider
+            &windowSlider, harmRowSlider, &polaritySlider, &jitterSlider, &styleSlider, &tiltSlider
         };
 
         for (int i = 0; i < kNumBars; ++i)

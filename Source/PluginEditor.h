@@ -103,6 +103,12 @@ private:
                 return juce::String (percent, 1);
             }
 
+            if (owner != nullptr && this == &owner->sidechainShadowSlider)
+            {
+                double percent = v * 100.0;
+                return juce::String (percent, 1);
+            }
+
             if (owner != nullptr && this == &owner->windowSlider)
             {
                 const int window = FREQTRAudioProcessor::getCanonicalHilbertWindow ((int) std::lround (v));
@@ -202,6 +208,7 @@ private:
     BarSlider engineSlider;
     BarSlider windowSlider;
     BarSlider harmSlider;
+    BarSlider sidechainShadowSlider;
     BarSlider polaritySlider;
     BarSlider styleSlider;
     BarSlider tiltSlider;
@@ -348,6 +355,7 @@ private:
     std::unique_ptr<SliderAttachment> windowAttachment;
     std::unique_ptr<SliderAttachment> styleAttachment;
     std::unique_ptr<SliderAttachment> harmAttachment;
+    std::unique_ptr<SliderAttachment> sidechainShadowAttachment;
     std::unique_ptr<SliderAttachment> polarityAttachment;
     std::unique_ptr<SliderAttachment> mixAttachment;
     std::unique_ptr<SliderAttachment> inputAttachment;
@@ -535,6 +543,8 @@ private:
 
     juce::String getHarmText() const;
     juce::String getHarmTextShort() const;
+    juce::String getSidechainShadowText() const;
+    juce::String getSidechainShadowTextShort() const;
 
     juce::String getPolarityText() const;
     juce::String getPolarityTextShort() const;

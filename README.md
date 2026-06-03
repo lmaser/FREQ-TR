@@ -161,13 +161,13 @@ Enables sidechain carrier mode. Instead of relying only on the internal sine/har
 - In RM mode, sidechain is used as the bipolar multiplier.
 - In FREQ SHIFT mode, sidechain drives the shift amount and can add the `SHADOW` Hilbert/quadrature sidechain texture.
 
-If the sidechain bus is not connected or contains no incoming audio, the sidechain-controlled wet contribution closes toward the aligned clean reference. FREQ SHIFT keeps the internal frequency-shift path available while sidechain depth and `SHADOW` close with detector presence.
+If the sidechain bus is not connected or contains no incoming audio, the sidechain-controlled wet contribution closes toward the aligned clean reference. FREQ SHIFT keeps the internal frequency-shift path available while sidechain depth and `SHADOW` close with detector depth, avoiding abrupt entry when the external input rises from silence or near-silence.
 
 Right-click `SIDECHAIN` to open its carrier prompt:
 - `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
 - `TONE` ranges from `250 Hz` to `20 kHz`; default is `5 kHz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
-The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/carrier inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level.
+The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/carrier inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level. In FREQ SHIFT mode, both direct sidechain shift depth and `SHADOW` blend follow the smoothed detector depth so tiny input transitions do not hard-switch the sidechain texture.
 
 In FREQ SHIFT sidechain mode, the disabled `HARM` row becomes `SHADOW` (`SHD` in compact text). `SHADOW` ranges from `0%` to `100%`, defaults to `100%`, and blends the direct sidechain-controlled shifter with the more imprint-like Hilbert/quadrature sidechain texture.
 
@@ -328,6 +328,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added optional `SIDECHAIN` carrier mode with smooth/tone prompt
 - Extended `SIDECHAIN` SMOOTH/TONE range and made sidechain frequency-shift direction follow `POLARITY`
 - Added `SHADOW` blend for FREQ SHIFT sidechain texture
+- Refined FREQ SHIFT sidechain entry so direct sidechain shift and `SHADOW` follow detector depth instead of opening abruptly at the detection threshold
 - Added limiter with `WET` / `GLOBAL` modes
 - Added COMB parameter for feedback resonance tuning
 - Added prompt-based numeric entry refinements and smoothing improvements

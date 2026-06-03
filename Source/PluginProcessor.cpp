@@ -1426,7 +1426,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					* kSidechainFreqShiftAmountGain * sidechainGateSmoothed_)
 			: 1.0f;
 		const float sidechainFreqShiftPresence = sidechainEnabled
-			? juce::jlimit (0.0f, 1.0f, sidechainGateSmoothed_ * sidechainPolarityAbs)
+			? juce::jlimit (0.0f, 1.0f, sidechainEffectPresence * sidechainPolarityAbs)
 			: 0.0f;
 		const float effectiveFb = fb;
 
@@ -1695,7 +1695,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				float shadowFsL = fsL;
 				float shadowFsR = fsR;
 				const float sidechainShadowMix = (sidechainEnabled && smoothedEngine > 0.5f && sidechainGateSmoothed_ > 0.0001f)
-					? juce::jlimit (0.0f, 1.0f, smoothedSidechainShadow_)
+					? juce::jlimit (0.0f, 1.0f,
+						smoothedSidechainShadow_ * sidechainEffectPresence * sidechainPolarityAbs)
 					: 0.0f;
 				if (sidechainShadowMix > 0.0001f)
 				{

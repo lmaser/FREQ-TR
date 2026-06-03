@@ -33,7 +33,7 @@ public:
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
 	static constexpr const char* kParamSidechain = "sidechain";
-	static constexpr const char* kParamSidechainSmooth = "sidechain_time";
+	static constexpr const char* kParamSidechainSmooth = "sidechain_smooth";
 	static constexpr const char* kParamSidechainTone = "sidechain_tone";
 	static constexpr const char* kParamSidechainShadow = "sidechain_shadow";
 
@@ -431,8 +431,6 @@ private:
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	double oscPhaseR = 0.0;        // R-channel phase (WIDE/DUAL: different rate)
-	double internalOscPhase = 0.0; // Feedback-only FREQ SHIFT phase, not sidechain-modulated
-	double internalOscPhaseR = 0.0;
 	double amRmOscPhase = 0.0;     // AM/RM carrier phase, jitter-smoothed separately
 	double amRmOscPhaseR = 0.0;
 

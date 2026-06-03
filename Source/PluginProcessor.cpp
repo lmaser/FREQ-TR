@@ -467,8 +467,6 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 		state.reset();
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
-	internalOscPhase = 0.0;
-	internalOscPhaseR = 0.0;
 	amRmOscPhase = 0.0;
 	amRmOscPhaseR = 0.0;
 	syncRetrigPhase = 0.0;
@@ -1571,21 +1569,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float sidechainFreqShiftBaseR = sidechainFreqShiftBaseL * (style == 3 ? 0.5f : 1.0f);
 		const float fsSidechainFreqL = sidechainFreqShiftBaseL * sidechainShiftModL;
 		const float fsSidechainFreqR = sidechainFreqShiftBaseR * (style == 3 ? sidechainShiftModR : sidechainShiftModL);
+		const float sidechainFreqShiftModBlend = sidechainFreqShiftPresence
+			* (sidechainEnabled ? (1.0f - juce::jlimit (0.0f, 1.0f, smoothedSidechainShadow_)) : 1.0f);
 		const float fsRenderFreqL = sidechainEnabled
-			? jitteredFreqL + sidechainFreqShiftPresence * (fsSidechainFreqL - jitteredFreqL)
+			? jitteredFreqL + sidechainFreqShiftModBlend * (fsSidechainFreqL - jitteredFreqL)
 			: jitteredFreqL;
 		const float fsRenderFreqR = sidechainEnabled
-			? jitteredFreqR + sidechainFreqShiftPresence * (fsSidechainFreqR - jitteredFreqR)
+			? jitteredFreqR + sidechainFreqShiftModBlend * (fsSidechainFreqR - jitteredFreqR)
 			: jitteredFreqR;
 		const auto fsHarmPairL = fastHarmonicOscPair ((float) oscPhase, smoothedHarm, fsRenderFreqL);
 		const auto fsHarmPairR = fastHarmonicOscPair ((float) oscPhaseR, smoothedHarm, fsRenderFreqR);
-		const bool useInternalFreqShiftFeedback = sidechainEnabled && smoothedEngine > 0.5f;
-		const auto internalFsHarmPairL = useInternalFreqShiftFeedback
-			? fastHarmonicOscPair ((float) internalOscPhase, smoothedHarm, jitteredFreqL)
-			: fsHarmPairL;
-		const auto internalFsHarmPairR = useInternalFreqShiftFeedback
-			? fastHarmonicOscPair ((float) internalOscPhaseR, smoothedHarm, jitteredFreqR)
-			: fsHarmPairR;
 
 		const float amRmWave  = amRmHarmPairL.sine;
 		const float amRmWaveR = amRmHarmPairR.sine;
@@ -1593,10 +1586,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float fsWaveCos  = fsHarmPairL.cosine;
 		const float fsWaveR    = fsHarmPairR.sine;
 		const float fsWaveCosR = fsHarmPairR.cosine;
-		const float internalFsWave     = internalFsHarmPairL.sine;
-		const float internalFsWaveCos  = internalFsHarmPairL.cosine;
-		const float internalFsWaveR    = internalFsHarmPairR.sine;
-		const float internalFsWaveCosR = internalFsHarmPairR.cosine;
 
 		// ── Engine blend: AM (0) -> RM (0.5) -> Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
@@ -1676,10 +1665,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float fsSinL = fsWave;
 				const float fsCosR = style == 3 ? fsWaveCosR : fsWaveCos;
 				const float fsSinR = style == 3 ? fsWaveR : fsWave;
-				const float internalFsCosL = internalFsWaveCos;
-				const float internalFsSinL = internalFsWave;
-				const float internalFsCosR = style == 3 ? internalFsWaveCosR : internalFsWaveCos;
-				const float internalFsSinR = style == 3 ? internalFsWaveR : internalFsWave;
 
 				const float amL = realL * amEnvelope (carrierWaveL, 1.0f);
 				const float amR = useStereoInput ? (realR * amEnvelope (carrierWaveR, 1.0f)) : amL;
@@ -1707,11 +1692,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					? (style == 2 ? (fsRealR * fsCosR + fsImagR * fsSinR)
 					  : (fsRealR * fsCosR - fsImagR * fsSinR))
 					: fsL;
-				const float internalFsL = fsRealL * internalFsCosL - fsImagL * internalFsSinL;
-				const float internalFsR = useStereoInput
-					? (style == 2 ? (fsRealR * internalFsCosR + fsImagR * internalFsSinR)
-					  : (fsRealR * internalFsCosR - fsImagR * internalFsSinR))
-					: internalFsL;
 				float shadowFsL = fsL;
 				float shadowFsR = fsR;
 				const float sidechainShadowMix = (sidechainEnabled && smoothedEngine > 0.5f && sidechainGateSmoothed_ > 0.0001f)
@@ -1734,10 +1714,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 					const float sidechainRealL = sidechainModBufL[(size_t) delayIdx];
 					const float sidechainRealR = sidechainModBufR[(size_t) delayIdx];
-					const float shadowCosL = sidechainRealL;
-					const float shadowSinL = sidechainHilbL * sidechainPolaritySign;
-					const float shadowCosR = (style == 3) ? sidechainRealR : sidechainRealL;
-					const float shadowSinR = (style == 3) ? sidechainHilbR * sidechainPolaritySign : shadowSinL;
+					const float shadowCarrierGain = 1.0f / sidechainShapeNorm;
+					const float shadowCosL = sidechainRealL * shadowCarrierGain;
+					const float shadowSinL = sidechainHilbL * shadowCarrierGain * sidechainPolaritySign;
+					const float shadowSourceRealR = (style == 3) ? sidechainRealR : sidechainRealL;
+					const float shadowSourceHilbR = (style == 3) ? sidechainHilbR : sidechainHilbL;
+					const float shadowCosR = shadowSourceRealR * shadowCarrierGain;
+					const float shadowSinR = shadowSourceHilbR * shadowCarrierGain * sidechainPolaritySign;
 
 					const float shadowRawL = realL * shadowCosL - hilbL * shadowSinL;
 					const float shadowRawR = useStereoInput
@@ -1745,8 +1728,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 						  : (realR * shadowCosR - hilbR * shadowSinR))
 						: shadowRawL;
 					const float shadowDryR = useStereoInput ? realR : realL;
-					shadowFsL = realL + sidechainPolarityAbs * (shadowRawL - realL);
-					shadowFsR = shadowDryR + sidechainPolarityAbs * (shadowRawR - shadowDryR);
+					const float shadowDepth = sidechainEffectPresence * sidechainPolarityAbs;
+					shadowFsL = realL + shadowDepth * (shadowRawL - realL);
+					shadowFsR = shadowDryR + shadowDepth * (shadowRawR - shadowDryR);
 				}
 
 				const float enginePos = juce::jlimit (0.0f, 1.0f, smoothedEngine);
@@ -1760,8 +1744,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					: 1.0f;
 				const float fsOutL = fsL + sidechainShadowMix * (shadowFsL - fsL);
 				const float fsOutR = fsR + sidechainShadowMix * (shadowFsR - fsR);
-				const float feedbackFsL = sidechainEnabled ? internalFsL : fsL;
-				const float feedbackFsR = sidechainEnabled ? internalFsR : fsR;
+				const float feedbackFsL = fsL;
+				const float feedbackFsR = fsR;
 				const float amOutL = sidechainEnabled ? internalAmL + scMix * (sidechainInputAmL - internalInputAmL) : amL;
 				const float amOutR = sidechainEnabled ? internalAmR + scMix * (sidechainInputAmR - internalInputAmR) : amR;
 				const float rmOutL = sidechainEnabled ? internalRmL + scMix * (sidechainInputRmL - internalInputRmL) : rmL;
@@ -2125,12 +2109,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
 
-			internalOscPhase += (double) jitteredFreqL * (double) invSr;
-			internalOscPhase -= std::floor (internalOscPhase);
-
-			internalOscPhaseR += (double) jitteredFreqR * (double) invSr;
-			internalOscPhaseR -= std::floor (internalOscPhaseR);
-
 			amRmOscPhase = wrapPhase01 (nextCyclePos * syncRetrigRatioL);
 			amRmOscPhaseR = wrapPhase01 (nextCyclePos * syncRetrigRatioR);
 		}
@@ -2141,12 +2119,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
-
-			internalOscPhase += (double) jitteredFreqL * (double) invSr;
-			internalOscPhase -= std::floor (internalOscPhase);
-
-			internalOscPhaseR += (double) jitteredFreqR * (double) invSr;
-			internalOscPhaseR -= std::floor (internalOscPhaseR);
 
 			syncAmRmPhaseAccumL += (double) amRmFreqL * (double) invSr;
 			syncAmRmPhaseAccumL -= std::floor (syncAmRmPhaseAccumL);
@@ -2163,12 +2135,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
-
-			internalOscPhase += (double) jitteredFreqL * (double) invSr;
-			internalOscPhase -= std::floor (internalOscPhase);
-
-			internalOscPhaseR += (double) jitteredFreqR * (double) invSr;
-			internalOscPhaseR -= std::floor (internalOscPhaseR);
 
 			amRmOscPhase += (double) amRmFreqL * (double) invSr;
 			amRmOscPhase -= std::floor (amRmOscPhase);

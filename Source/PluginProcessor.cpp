@@ -913,6 +913,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, false);
 	const float sidechainSmoothTarget = juce::jlimit (kSidechainSmoothMin, kSidechainSmoothMax,
 		loadAtomicOrDefault (sidechainSmoothParam, kSidechainSmoothDefault));
+	const bool sidechainDirectAtZeroSmooth = sidechainSmoothTarget <= 0.0001f;
 	const float sidechainLegacySmooth = juce::jmin (1.0f, sidechainSmoothTarget * 2.0f);
 	const float sidechainExtendedBlend = juce::jlimit (0.0f, 1.0f, (sidechainSmoothTarget - 0.5f) * 2.0f);
 	const float sidechainGateSmoothShape = (sidechainSmoothTarget <= 0.5f)
@@ -922,7 +923,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		loadAtomicOrDefault (sidechainToneParam, kSidechainToneDefault));
 	const float sidechainShadowTarget = juce::jlimit (kSidechainShadowMin, kSidechainShadowMax,
 		loadAtomicOrDefault (sidechainShadowParam, kSidechainShadowDefault));
-	const float sidechainGateTau = 0.001f + sidechainGateSmoothShape * sidechainGateSmoothShape * 0.040f;
+	constexpr float kSidechainMinGateTau = 0.00025f;
+	constexpr float kSidechainMaxGateTau = 0.040f;
+	const float sidechainGateTau = kSidechainMinGateTau
+		+ sidechainGateSmoothShape * sidechainGateSmoothShape * kSidechainMaxGateTau;
 	const float sidechainGateCoeff = std::exp (-1.0f / ((float) currentSampleRate * sidechainGateTau));
 	const float sidechainDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * 20.0f / (float) currentSampleRate);
 	const float sidechainToneEndFactor = std::pow (
@@ -949,19 +953,31 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainToneBqA2 = (1.0f - sidechainToneK / sidechainToneBiquadQ + sidechainToneK2)
 		* sidechainToneBiquadNorm;
 	const float sidechainLegacySmoothSquared = sidechainLegacySmooth * sidechainLegacySmooth;
+	const float sidechainMaxSmoothHz = juce::jmax (20.0f, (float) currentSampleRate * 0.45f);
 	const float sidechainCarrierSmoothMul = (sidechainSmoothTarget <= 0.5f)
-		? (4.0f - 3.75f * sidechainLegacySmoothSquared)
+		? (sidechainMaxSmoothHz / juce::jmax (20.0f, sidechainToneTarget)
+			+ sidechainLegacySmoothSquared * (0.25f - sidechainMaxSmoothHz / juce::jmax (20.0f, sidechainToneTarget)))
 		: juce::jmap (sidechainExtendedBlend, 0.25f, 0.10f);
 	const float sidechainCarrierSmoothHz = juce::jlimit (20.0f, (float) currentSampleRate * 0.45f,
 		sidechainToneTarget * sidechainCarrierSmoothMul);
-	const float sidechainCarrierSmoothCoeff = std::exp (-juce::MathConstants<float>::twoPi
-		* sidechainCarrierSmoothHz / (float) currentSampleRate);
-	constexpr float kSidechainFreqShiftSmoothMultiplier = 0.25f;
+	const float sidechainCarrierSmoothCoeff = sidechainDirectAtZeroSmooth
+		? 0.0f
+		: std::exp (-juce::MathConstants<float>::twoPi * sidechainCarrierSmoothHz / (float) currentSampleRate);
+	const float sidechainFreqShiftSmoothMultiplier = (sidechainSmoothTarget <= 0.5f)
+		? juce::jmap (sidechainLegacySmooth, 1.0f, 0.25f)
+		: juce::jmap (sidechainExtendedBlend, 0.25f, 0.10f);
 	const float sidechainFreqShiftSmoothHz = juce::jlimit (20.0f, (float) currentSampleRate * 0.45f,
-		sidechainCarrierSmoothHz * kSidechainFreqShiftSmoothMultiplier);
-	const float sidechainFreqShiftSmoothCoeff = std::exp (-juce::MathConstants<float>::twoPi
-		* sidechainFreqShiftSmoothHz / (float) currentSampleRate);
-	const float sidechainDepthCoeff = std::exp (-1.0f / ((float) currentSampleRate * 0.020f));
+		sidechainCarrierSmoothHz * sidechainFreqShiftSmoothMultiplier);
+	const float sidechainFreqShiftSmoothCoeff = sidechainDirectAtZeroSmooth
+		? 0.0f
+		: std::exp (-juce::MathConstants<float>::twoPi * sidechainFreqShiftSmoothHz / (float) currentSampleRate);
+	constexpr float kSidechainMinDepthTau = 0.0005f;
+	constexpr float kSidechainMaxDepthTau = 0.040f;
+	const float sidechainDepthTau = kSidechainMinDepthTau
+		+ sidechainGateSmoothShape * sidechainGateSmoothShape * kSidechainMaxDepthTau;
+	const float sidechainDepthCoeff = sidechainDirectAtZeroSmooth
+		? 0.0f
+		: std::exp (-1.0f / ((float) currentSampleRate * sidechainDepthTau));
 
 	updateReportedLatency (pdcEnabled ? requestedMaxDelay : 0);
 
@@ -1416,15 +1432,18 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			: 1.0f;
 		const float sidechainRms = std::sqrt (juce::jmax (0.0f, sidechainRmsEnv_));
 		const float sidechainShapeNorm = juce::jmax (0.125f, sidechainRms);
+		const float sidechainFreqShiftNorm = sidechainDirectAtZeroSmooth
+			? 1.0f
+			: (1.0f + sidechainLegacySmooth * (sidechainShapeNorm - 1.0f));
 		constexpr float kSidechainFreqShiftAmountGain = 1.0f;
 		const float sidechainShiftModL = sidechainEnabled
 			? juce::jlimit (0.0f, 1.0f,
-				sidechainFreqShiftSmoothL_ / sidechainShapeNorm
+				sidechainFreqShiftSmoothL_ / sidechainFreqShiftNorm
 					* kSidechainFreqShiftAmountGain * sidechainGateSmoothed_)
 			: 1.0f;
 		const float sidechainShiftModR = sidechainEnabled
 			? juce::jlimit (0.0f, 1.0f,
-				sidechainFreqShiftSmoothR_ / sidechainShapeNorm
+				sidechainFreqShiftSmoothR_ / sidechainFreqShiftNorm
 					* kSidechainFreqShiftAmountGain * sidechainGateSmoothed_)
 			: 1.0f;
 		const float sidechainFreqShiftPresence = sidechainEnabled

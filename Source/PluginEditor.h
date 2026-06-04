@@ -316,7 +316,7 @@ private:
     MainGuiPromptToggleButton midiButton;
 
     // 2 checkboxes: ALIGN, PDC
-    juce::ToggleButton alignButton;
+    MainGuiPromptToggleButton alignButton;
     MainGuiPromptToggleButton pdcButton;
     juce::Label pdcDisplay;
 

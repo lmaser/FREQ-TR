@@ -345,6 +345,8 @@ private:
 	int hilbertWindowCrossfadeTotal_ = 0;
 	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
 	float hilbertFeedbackCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
+	float freqShiftRealBuf_[2][kHilbertMaxOrder] = {};
+	float freqShiftImagBuf_[2][kHilbertMaxOrder] = {};
 
 	struct FreqShiftAllpassSection
 	{

@@ -447,6 +447,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainModBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 	std::memset (hilbertFeedbackCompBuf_, 0, sizeof (hilbertFeedbackCompBuf_));
+	std::memset (freqShiftRealBuf_, 0, sizeof (freqShiftRealBuf_));
+	std::memset (freqShiftImagBuf_, 0, sizeof (freqShiftImagBuf_));
 
 	hilbertPos = 0;
 	{
@@ -1560,6 +1562,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		hilbertBufR[(size_t) hilbertPos] = fbInR;
 		const auto freqShiftIirL = freqShiftHilbertIir_[0].process (fbInL);
 		const auto freqShiftIirR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
+		freqShiftRealBuf_[0][hilbertPos] = freqShiftIirL.first;
+		freqShiftImagBuf_[0][hilbertPos] = freqShiftIirL.second;
+		freqShiftRealBuf_[1][hilbertPos] = freqShiftIirR.first;
+		freqShiftImagBuf_[1][hilbertPos] = freqShiftIirR.second;
 
 		// Harmonic oscillator pairs (fullness/slope profile, RMS-normalized).
 		// AM/RM uses a separately smoothed jitter deviation to avoid audio-rate carrier crackle.
@@ -1683,10 +1689,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float internalInputRmL = effectRealL * internalCarrierWaveL;
 				const float internalInputRmR = useStereoInput ? (effectRealR * internalCarrierWaveR) : internalInputRmL;
 
-				const float fsRealL = freqShiftIirL.first;
-				const float fsImagL = freqShiftIirL.second;
-				const float fsRealR = freqShiftIirR.first;
-				const float fsImagR = freqShiftIirR.second;
+				const int fsIdx = alignEnabled ? delayIdx : hilbertPos;
+				const float fsRealL = freqShiftRealBuf_[0][fsIdx];
+				const float fsImagL = freqShiftImagBuf_[0][fsIdx];
+				const float fsRealR = freqShiftRealBuf_[1][fsIdx];
+				const float fsImagR = freqShiftImagBuf_[1][fsIdx];
 				const float fsL = fsRealL * fsCosL - fsImagL * fsSinL;
 				const float fsR = useStereoInput
 					? (style == 2 ? (fsRealR * fsCosR + fsImagR * fsSinR)

@@ -1692,19 +1692,19 @@ void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
         return;
 
     const bool sidechainOn = sidechainButton.getToggleState();
-    const float carrierAlpha = sidechainOn ? 0.35f : 1.0f;
+    const float harmonicAlpha = sidechainOn ? 0.35f : 1.0f;
 
-    freqSlider.setAlpha (carrierAlpha);
-    modSlider.setAlpha (carrierAlpha);
-    harmSlider.setAlpha (carrierAlpha);
+    freqSlider.setAlpha (1.0f);
+    modSlider.setAlpha (1.0f);
+    harmSlider.setAlpha (harmonicAlpha);
     sidechainShadowSlider.setAlpha (1.0f);
-    syncButton.setAlpha (carrierAlpha);
-    midiButton.setAlpha (carrierAlpha);
-    retrigDisplay.setAlpha (carrierAlpha);
-    midiChannelDisplay.setAlpha (carrierAlpha);
+    syncButton.setAlpha (1.0f);
+    midiButton.setAlpha (1.0f);
+    retrigDisplay.setAlpha (1.0f);
+    midiChannelDisplay.setAlpha (1.0f);
 
-    freqSlider.setEnabled (! sidechainOn);
-    modSlider.setEnabled (! sidechainOn);
+    freqSlider.setEnabled (true);
+    modSlider.setEnabled (true);
     const bool showShadow = sidechainOn && ! ioSectionExpanded_ && harmSlider.getWidth() > 0 && harmSlider.getHeight() > 0;
     if (showShadow)
     {
@@ -1722,10 +1722,10 @@ void FREQTRAudioProcessorEditor::updateSidechainDependentControls()
             harmSlider.setVisible (true);
         harmSlider.setEnabled (! sidechainOn);
     }
-    syncButton.setEnabled (! sidechainOn);
-    midiButton.setEnabled (! sidechainOn);
-    retrigDisplay.setEnabled (! sidechainOn);
-    midiChannelDisplay.setEnabled (! sidechainOn);
+    syncButton.setEnabled (true);
+    midiButton.setEnabled (true);
+    retrigDisplay.setEnabled (true);
+    midiChannelDisplay.setEnabled (true);
 
     repaint();
 }
@@ -2088,12 +2088,6 @@ bool FREQTRAudioProcessorEditor::refreshLegendTextCache()
 
     const bool sidechainOn = sidechainButton.getToggleState();
     const bool freqShiftActive = (engineSlider.getValue() > 0.5);
-
-    if (sidechainOn)
-    {
-        setLabelOnly (cachedFreqTextFull, cachedFreqTextShort, cachedFreqIntOnly, "FREQ");
-        setLabelOnly (cachedModTextFull, cachedModTextShort, cachedModIntOnly, "MOD");
-    }
 
     if (sidechainOn)
     {

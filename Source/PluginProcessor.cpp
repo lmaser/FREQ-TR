@@ -800,7 +800,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool sidechainCarrierDetected = sidechainBusAvailable && sidechainPeak > 1.0e-6f;
 
 	// ── MIDI note tracking ──
-	const bool midiEnabled = ! sidechainEnabled && loadBoolParamOrDefault (midiParam, false);
+	const bool midiEnabled = loadBoolParamOrDefault (midiParam, false);
 	const int midiDelaySamples = juce::jmax (0, (int) std::lround ((double) currentSampleRate
 		* (double) juce::jlimit (0, 100, getMidiDelayMs()) / 1000.0));
 
@@ -908,7 +908,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 	const bool  hpOn = loadBoolParamOrDefault (filterHpOnParam, false);
 	const bool  lpOn = loadBoolParamOrDefault (filterLpOnParam, false);
-	const bool  syncEnabled  = ! sidechainEnabled && loadBoolParamOrDefault (syncParam, false);
+	const bool  syncEnabled  = loadBoolParamOrDefault (syncParam, false);
 	const bool  alignEnabled = loadBoolParamOrDefault (alignParam, false);
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, false);
 	const float sidechainSmoothTarget = juce::jlimit (kSidechainSmoothMin, kSidechainSmoothMax,

@@ -79,7 +79,7 @@ Shift/modulation frequency. At 0 Hz the wet result collapses to the aligned inpu
 
 When MIDI is active, the effective frequency follows the incoming note. When SYNC is active, the effective frequency follows the selected DAW subdivision.
 
-When `SIDECHAIN` is active, the external input drives the modulation path, so `FREQ`, `MOD`, `SYNC`, and `MIDI` are disabled in the UI. In FREQ SHIFT mode, the `HARM` row becomes `SHADOW`, a sidechain frequency-shift texture blend.
+When `SIDECHAIN` is active, the external input drives the modulation path while `FREQ`, `MOD`, `SYNC`, and `MIDI` remain available as the internal frequency base. In FREQ SHIFT mode, the `HARM` row becomes `SHADOW`, a sidechain frequency-shift texture blend.
 
 ### FREQ SYNC
 
@@ -162,6 +162,8 @@ Enables sidechain carrier mode. Instead of relying only on the internal sine/har
 - In FREQ SHIFT mode, sidechain drives the shift amount and can add the `SHADOW` Hilbert/quadrature sidechain texture.
 
 If the sidechain bus is not connected or contains no incoming audio, the sidechain-controlled wet contribution closes toward the aligned clean reference. FREQ SHIFT keeps the internal frequency-shift path available while sidechain depth and `SHADOW` close with detector depth, avoiding abrupt entry when the external input rises from silence or near-silence.
+
+`FREQ`, `MOD`, `SYNC`, and `MIDI` remain active in `SIDECHAIN` mode. They set the internal/base frequency used by the fallback path and by the frequency-shift interaction while the sidechain detector controls the external modulation depth.
 
 Right-click `SIDECHAIN` to open its carrier prompt:
 - `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.

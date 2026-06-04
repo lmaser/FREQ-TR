@@ -88,7 +88,7 @@ public:
 	// Parameter ranges and defaults
 	static constexpr float kFreqMin     =  0.0f;
 	static constexpr float kFreqMax     =  5000.0f;
-	static constexpr float kSidechainFreqShiftMax = 500.0f;
+	static constexpr float kSidechainFreqShiftMax = 312.5f;
 	static constexpr float kFreqDefault =  0.0f;
 	static constexpr float kFreqSkew    =  0.22307028f; // 10 Hz at 25% of the manual range.
 
@@ -433,6 +433,8 @@ private:
 	// ── Oscillator state ──
 	double oscPhase = 0.0;         // 0..1 normalised phase
 	double oscPhaseR = 0.0;        // R-channel phase (WIDE/DUAL: different rate)
+	double shadowOscPhase = 0.0;   // Sidechain SHADOW shift phase
+	double shadowOscPhaseR = 0.0;
 	double amRmOscPhase = 0.0;     // AM/RM carrier phase, jitter-smoothed separately
 	double amRmOscPhaseR = 0.0;
 

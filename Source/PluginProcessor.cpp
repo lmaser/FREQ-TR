@@ -469,6 +469,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 		state.reset();
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
+	shadowOscPhase = 0.0;
+	shadowOscPhaseR = 0.0;
 	amRmOscPhase = 0.0;
 	amRmOscPhaseR = 0.0;
 	syncRetrigPhase = 0.0;
@@ -1611,6 +1613,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		const float fsWaveCos  = fsHarmPairL.cosine;
 		const float fsWaveR    = fsHarmPairR.sine;
 		const float fsWaveCosR = fsHarmPairR.cosine;
+		const float shadowShiftWave = fastSin ((float) shadowOscPhase);
+		const float shadowShiftWaveCos = fastCos ((float) shadowOscPhase);
+		const float shadowShiftWaveR = fastSin ((float) shadowOscPhaseR);
+		const float shadowShiftWaveCosR = fastCos ((float) shadowOscPhaseR);
 
 		// ── Engine blend: AM (0) -> RM (0.5) -> Freq Shift (1) ──
 		const bool useStereoInput = (style >= 1);
@@ -1729,25 +1735,40 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
 					float hilbL = 0.0f, hilbR = 0.0f;
 					float sidechainHilbL = 0.0f, sidechainHilbR = 0.0f;
+					constexpr int kShadowPolarityMaxOffsetSamples = 32;
+					const int shadowPolarityOffset = (int) std::round (
+						sidechainPolarity * (float) kShadowPolarityMaxOffsetSamples);
+					const int sidechainHilbertCentre = (hilbertPos + shadowPolarityOffset + order) & orderMask;
 					for (const auto& tap : taps)
 					{
 						const int i1 = (hilbertPos - tap.offset + order) & orderMask;
 						const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & orderMask;
+						const int sc1 = (sidechainHilbertCentre - tap.offset + order) & orderMask;
+						const int sc2 = (sidechainHilbertCentre - (firLength - 1 - tap.offset) + order) & orderMask;
 						hilbL += tap.coeff * (hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2]);
 						hilbR += tap.coeff * (hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2]);
-						sidechainHilbL += tap.coeff * (sidechainModBufL[(size_t) i1] - sidechainModBufL[(size_t) i2]);
-						sidechainHilbR += tap.coeff * (sidechainModBufR[(size_t) i1] - sidechainModBufR[(size_t) i2]);
+						sidechainHilbL += tap.coeff * (sidechainModBufL[(size_t) sc1] - sidechainModBufL[(size_t) sc2]);
+						sidechainHilbR += tap.coeff * (sidechainModBufR[(size_t) sc1] - sidechainModBufR[(size_t) sc2]);
 					}
 
-					const float sidechainRealL = sidechainModBufL[(size_t) delayIdx];
-					const float sidechainRealR = sidechainModBufR[(size_t) delayIdx];
+					const int sidechainRealIdx = (delayIdx + shadowPolarityOffset + order) & orderMask;
+					const float sidechainRealL = sidechainModBufL[(size_t) sidechainRealIdx];
+					const float sidechainRealR = sidechainModBufR[(size_t) sidechainRealIdx];
 					const float shadowCarrierGain = 1.0f / sidechainShapeNorm;
-					const float shadowCosL = sidechainRealL * shadowCarrierGain;
-					const float shadowSinL = sidechainHilbL * shadowCarrierGain * sidechainPolaritySign;
+					const float shadowBaseCosL = sidechainRealL * shadowCarrierGain;
+					const float shadowBaseSinL = sidechainHilbL * shadowCarrierGain * sidechainPolaritySign;
 					const float shadowSourceRealR = (style == 3) ? sidechainRealR : sidechainRealL;
 					const float shadowSourceHilbR = (style == 3) ? sidechainHilbR : sidechainHilbL;
-					const float shadowCosR = shadowSourceRealR * shadowCarrierGain;
-					const float shadowSinR = shadowSourceHilbR * shadowCarrierGain * sidechainPolaritySign;
+					const float shadowBaseCosR = shadowSourceRealR * shadowCarrierGain;
+					const float shadowBaseSinR = shadowSourceHilbR * shadowCarrierGain * sidechainPolaritySign;
+					const float shadowShiftCosL = shadowShiftWaveCos;
+					const float shadowShiftSinL = shadowShiftWave;
+					const float shadowShiftCosR = (style == 3) ? shadowShiftWaveCosR : shadowShiftWaveCos;
+					const float shadowShiftSinR = (style == 3) ? shadowShiftWaveR : shadowShiftWave;
+					const float shadowCosL = shadowBaseCosL * shadowShiftCosL - shadowBaseSinL * shadowShiftSinL;
+					const float shadowSinL = shadowBaseSinL * shadowShiftCosL + shadowBaseCosL * shadowShiftSinL;
+					const float shadowCosR = shadowBaseCosR * shadowShiftCosR - shadowBaseSinR * shadowShiftSinR;
+					const float shadowSinR = shadowBaseSinR * shadowShiftCosR + shadowBaseCosR * shadowShiftSinR;
 
 					const float shadowRawL = realL * shadowCosL - hilbL * shadowSinL;
 					const float shadowRawR = useStereoInput
@@ -2135,6 +2156,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
+			shadowOscPhase += (double) jitteredFreqL * (double) invSr;
+			shadowOscPhase -= std::floor (shadowOscPhase);
+			shadowOscPhaseR += (double) jitteredFreqR * (double) invSr;
+			shadowOscPhaseR -= std::floor (shadowOscPhaseR);
 
 			amRmOscPhase = wrapPhase01 (nextCyclePos * syncRetrigRatioL);
 			amRmOscPhaseR = wrapPhase01 (nextCyclePos * syncRetrigRatioR);
@@ -2146,6 +2171,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
+			shadowOscPhase += (double) jitteredFreqL * (double) invSr;
+			shadowOscPhase -= std::floor (shadowOscPhase);
+			shadowOscPhaseR += (double) jitteredFreqR * (double) invSr;
+			shadowOscPhaseR -= std::floor (shadowOscPhaseR);
 
 			syncAmRmPhaseAccumL += (double) amRmFreqL * (double) invSr;
 			syncAmRmPhaseAccumL -= std::floor (syncAmRmPhaseAccumL);
@@ -2162,6 +2191,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			oscPhaseR += (double) fsRenderFreqR * (double) invSr;
 			oscPhaseR -= std::floor (oscPhaseR);
+			shadowOscPhase += (double) jitteredFreqL * (double) invSr;
+			shadowOscPhase -= std::floor (shadowOscPhase);
+			shadowOscPhaseR += (double) jitteredFreqR * (double) invSr;
+			shadowOscPhaseR -= std::floor (shadowOscPhaseR);
 
 			amRmOscPhase += (double) amRmFreqL * (double) invSr;
 			amRmOscPhase -= std::floor (amRmOscPhase);
@@ -2244,6 +2277,8 @@ void FREQTRAudioProcessor::setStateInformation (const void* data, int sizeInByte
 				loadAtomicOrDefault (polarityParam, kPolarityDefault));
 			smoothedSidechainPolaritySign_ = restoredPolarity < 0.0f ? -1.0f
 				: (restoredPolarity > 0.0f ? 1.0f : 0.0f);
+			shadowOscPhase = 0.0;
+			shadowOscPhaseR = 0.0;
 			sidechainDcPrevInL_ = 0.0f;
 			sidechainDcPrevInR_ = 0.0f;
 			sidechainDcPrevOutL_ = 0.0f;

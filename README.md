@@ -98,11 +98,11 @@ Resonant frequency of the feedback delay line. Higher values shorten the feedbac
 
 At 0 Hz the comb control is visually at its floor; when feedback is active, the internal feedback delay uses a safe 0.1 Hz effective minimum.
 
-### FBK (-100 to +100%)
+### FBK (0 to 100%)
 
 Feeds the wet output back into the Hilbert input. This creates barberpole-like stacks in frequency-shift mode and increasingly metallic recirculation in AM mode.
 
-Negative values invert the feedback loop polarity. `POL` still controls the carrier / frequency-shift direction, so `POL -1` and `FBK -100%` are intentionally different controls.
+`POL` controls the carrier / frequency-shift direction; `FBK` controls only the positive feedback amount.
 
 The feedback path includes:
 - smoothed control response
@@ -155,7 +155,7 @@ This affects both AM and frequency-shift behavior. At low values the modulation 
 
 ### SIDECHAIN
 
-Enables sidechain carrier mode. Instead of relying only on the internal sine/harmonic oscillator, the plugin uses the optional sidechain audio input to drive the modulation path.
+Enables external sidechain modulation. Instead of relying only on the internal sine/harmonic oscillator, the plugin uses the optional sidechain audio input to drive the modulation path.
 
 - In AM mode, sidechain drives the unipolar amplitude envelope.
 - In RM mode, sidechain is used as the bipolar multiplier.
@@ -165,11 +165,11 @@ If the sidechain bus is not connected or contains no incoming audio, the sidecha
 
 `FREQ`, `MOD`, `SYNC`, and `MIDI` remain active in `SIDECHAIN` mode. They set the internal/base frequency used by the fallback path and by the frequency-shift interaction while the sidechain detector controls the external modulation depth.
 
-Right-click `SIDECHAIN` to open its carrier prompt:
-- `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower carrier entry/exit smoothing and inertia before AM/RM/frequency-shift processing.
-- `TONE` ranges from `250 Hz` to `20 kHz`; default is `5 kHz`. It sets the useful upper carrier limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
+Right-click `SIDECHAIN` to open its modulation prompt:
+- `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower detector/input smoothing and inertia before AM/RM/frequency-shift processing.
+- `TONE` ranges from `250 Hz` to `20 kHz`; default is `5 kHz`. It sets the useful upper sidechain tone limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
-The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/carrier inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level. In FREQ SHIFT mode, both direct sidechain shift depth and `SHADOW` blend follow the smoothed detector depth so tiny input transitions do not hard-switch the sidechain texture.
+The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/input inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level. In FREQ SHIFT mode, both direct sidechain shift depth and `SHADOW` blend follow the smoothed detector depth so tiny input transitions do not hard-switch the sidechain texture.
 
 In FREQ SHIFT sidechain mode, the disabled `HARM` row becomes `SHADOW` (`SHD` in compact text). `SHADOW` ranges from `0%` to `100%`, defaults to `100%`, and blends the direct sidechain-controlled shifter with the more imprint-like Hilbert/quadrature sidechain texture.
 
@@ -181,7 +181,7 @@ Continuous multiplier applied to shift direction and AM/RM carrier polarity.
 - -1 = inverted / downward behavior
 - 0 = no effective shift
 
-In `SIDECHAIN` mode, `POLARITY` also controls the external carrier direction: negative values invert the sidechain quadrature for downward frequency-shift behavior, and the center position collapses cleanly to the aligned dry reference.
+In `SIDECHAIN` mode, `POLARITY` also controls sidechain modulation direction: negative values invert the sidechain quadrature for downward frequency-shift behavior, and the center position collapses cleanly to the aligned dry reference.
 
 ### SYNC
 
@@ -286,7 +286,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Hilbert transform: selectable 127 / 255 / 511 / 1023 / 2047-tap odd-length FIR with Blackman windowing
 - Real path: matched to the selected maximum Hilbert delay for stable PDC/ALIGN behavior
 - Oscillator: additive harmonic quadrature oscillator derived from a sine fundamental
-- Sidechain carrier: optional external audio carrier with smooth/tone controls and optional `SHADOW` Hilbert quadrature texture for frequency-shift operation
+- Sidechain modulation: optional external audio input with smooth/tone controls and optional `SHADOW` Hilbert quadrature texture for frequency-shift operation
 - Harmonic cap: 16 partials total, dynamically limited by Nyquist
 - Normalization: RMS compensation keeps HARM sweeps reasonably level-stable
 - Smoothing: one-pole EMA for the main continuous controls, plus dedicated smoothing where needed
@@ -327,7 +327,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added AM -> RM -> FREQ SHIFT engine mapping
 - Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency
-- Added optional `SIDECHAIN` carrier mode with smooth/tone prompt
+- Added optional `SIDECHAIN` modulation mode with smooth/tone prompt
 - Extended `SIDECHAIN` SMOOTH/TONE range and made sidechain frequency-shift direction follow `POLARITY`
 - Added `SHADOW` blend for FREQ SHIFT sidechain texture
 - Refined FREQ SHIFT sidechain entry so direct sidechain shift and `SHADOW` follow detector depth instead of opening abruptly at the detection threshold

@@ -49,11 +49,6 @@ static juce::String formatGainFaderDbCompact (float dB)
     return juce::String (dB, 1) + "dB";
 }
 
-static juce::String formatFilterPromptFrequency (float hz)
-{
-    return juce::String (juce::roundToInt (juce::jlimit (20.0f, 20000.0f, hz)));
-}
-
 static juce::String formatInlineFrequency (float hz)
 {
     if (hz < 0.05f)
@@ -1596,13 +1591,13 @@ juce::String FREQTRAudioProcessorEditor::getModTextShort() const
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackText() const
 {
-    const int pct = (int) std::lround (juce::jlimit (-1.0, 1.0, feedbackSlider.getValue()) * 100.0);
+    const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, feedbackSlider.getValue()) * 100.0);
     return juce::String (pct) + "% FBK";
 }
 
 juce::String FREQTRAudioProcessorEditor::getFeedbackTextShort() const
 {
-    const int pct = (int) std::lround (juce::jlimit (-1.0, 1.0, feedbackSlider.getValue()) * 100.0);
+    const int pct = (int) std::lround (juce::jlimit (0.0, 1.0, feedbackSlider.getValue()) * 100.0);
     return juce::String (pct) + "% FBK";
 }
 
@@ -2673,7 +2668,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         else if (&s == &modSlider)
             worstCaseText = "4.00";
         else if (&s == &feedbackSlider)
-            worstCaseText = "-100.00";
+            worstCaseText = "100.00";
         else if (&s == &jitterSlider)
             worstCaseText = "100.00";
         else if (&s == &engineSlider)
@@ -2813,10 +2808,10 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
         }
         else if (&s == &feedbackSlider)
         {
-            minVal = -100.0;
+            minVal = 0.0;
             maxVal = 100.0;
             maxDecs = 2;
-            maxLen = 7;
+            maxLen = 6;
         }
         else if (&s == &jitterSlider)
         {
@@ -3039,7 +3034,7 @@ void FREQTRAudioProcessorEditor::openNumericEntryPopupForSlider (juce::Slider& s
                 const juce::String numericToken = t.initialSectionContainingOnly ("0123456789.,-");
                 v = numericToken.getDoubleValue();
 
-                // Percent input maps to normalized slider units; FBK intentionally supports -100..+100.
+                // Percent input maps to normalized slider units.
                 if (safeThis != nullptr && (sliderPtr == &safeThis->engineSlider
                                          || sliderPtr == &safeThis->harmSlider
                                          || sliderPtr == &safeThis->sidechainShadowSlider
@@ -3832,13 +3827,14 @@ void FREQTRAudioProcessorEditor::openPdcMaxWindowPrompt()
         bar->setBounds (contentPad, y + rowH + barGap, contentW, barH);
     };
 
-    bar->onValueChanged = [aw, barToWindow, setMaxWindowParam, syncing, layoutRows] (float value01)
+    bar->onValueChanged = [aw, bar, barToWindow, windowToBar, setMaxWindowParam, syncing, layoutRows] (float value01)
     {
         if (*syncing)
             return;
 
         *syncing = true;
         const int window = barToWindow (value01);
+        bar->setValue (windowToBar (window));
         if (auto* te = aw->getTextEditor ("maxwin"))
         {
             te->setText (juce::String (window), juce::sendNotification);
@@ -6287,7 +6283,7 @@ int FREQTRAudioProcessorEditor::getTargetValueColumnWidth() const
         "1/64. FREQ",
         "X4.00 MOD",
         "5.00kHz COMB",
-        "-100% FBK",
+        "100% FBK",
         "100% JITTER",
         "FREQ SHIFT ENGINE",
         "100% AM|RM ENGINE",

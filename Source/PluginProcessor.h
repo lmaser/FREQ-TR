@@ -100,7 +100,7 @@ public:
 	static constexpr float kModMax     = 1.0f;
 	static constexpr float kModDefault = 0.5f;
 
-	static constexpr float kFeedbackMin     = -1.0f;
+	static constexpr float kFeedbackMin     = 0.0f;
 	static constexpr float kFeedbackMax     = 1.0f;
 	static constexpr float kFeedbackDefault = 0.0f;
 
@@ -1226,15 +1226,22 @@ private:
 
 	inline float applyJitterToFeedbackMagnitude (float feedback) const noexcept
 	{
-		const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
 		const float fb = juce::jlimit (-0.99f, 0.99f, feedback);
-		const float mag = std::abs (fb);
-		if (! kJitterModulatesFeedback || ! jitterActive_ || amt <= 0.000001f || mag <= 0.0f)
+		if constexpr (! kJitterModulatesFeedback)
+		{
 			return fb;
+		}
+		else
+		{
+			const float amt = juce::jlimit (0.0f, 1.0f, jitterAmountSmoothed_);
+			const float mag = std::abs (fb);
+			if (! jitterActive_ || amt <= 0.000001f || mag <= 0.0f)
+				return fb;
 
-		const float jitteredMag = juce::jlimit (0.0f, 0.99f,
-			mag * (1.0f + jitterFeedbackOut_ * jitterFeedbackDepth_));
-		return fb < 0.0f ? -jitteredMag : jitteredMag;
+			const float jitteredMag = juce::jlimit (0.0f, 0.99f,
+				mag * (1.0f + jitterFeedbackOut_ * jitterFeedbackDepth_));
+			return fb < 0.0f ? -jitteredMag : jitteredMag;
+		}
 	}
 
 	inline float applyJitterToCombTarget (float combSamples) const noexcept

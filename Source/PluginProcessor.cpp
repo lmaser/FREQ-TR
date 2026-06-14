@@ -32,6 +32,23 @@ namespace
 		return (dB <= FREQTRAudioProcessor::kGainFloorDb) ? 0.0f : std::exp2 (dB * 0.16609640474f);
 	}
 
+	inline float sanitiseFeedbackWrite (float v) noexcept
+	{
+		if (! std::isfinite (v))
+			return 0.0f;
+
+		constexpr float knee = 32.0f;
+		constexpr float limit = 64.0f;
+		const float av = std::abs (v);
+		if (av <= knee)
+			return v;
+
+		const float range = limit - knee;
+		const float excess = av - knee;
+		const float shaped = knee + range * excess / (excess + range);
+		return std::copysign (shaped, v);
+	}
+
 	inline juce::NormalisableRange<float> makeGainFaderRange() noexcept
 	{
 		return juce::NormalisableRange<float> (FREQTRAudioProcessor::kGainFloorDb,
@@ -1929,9 +1946,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		// Write conditioned wet into feedback delay line
 		{
-			const float condL = juce::jlimit (-4.0f, 4.0f,
+			const float condL = sanitiseFeedbackWrite (
 				dcBlockTick (biquadTick (feedbackWetL, fbkLpStateL, fbkLpCoeffs), fbkDcStateInL, fbkDcStateOutL, fbkDcCoeff));
-			const float condR = juce::jlimit (-4.0f, 4.0f,
+			const float condR = sanitiseFeedbackWrite (
 				dcBlockTick (biquadTick (feedbackWetR, fbkLpStateR, fbkLpCoeffs), fbkDcStateInR, fbkDcStateOutR, fbkDcCoeff));
 			fbkDelayBufL[(size_t) fbkDelayWritePos] = condL;
 			fbkDelayBufR[(size_t) fbkDelayWritePos] = condR;

@@ -447,8 +447,6 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainModBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 	std::memset (hilbertFeedbackCompBuf_, 0, sizeof (hilbertFeedbackCompBuf_));
-	std::memset (freqShiftRealBuf_, 0, sizeof (freqShiftRealBuf_));
-	std::memset (freqShiftImagBuf_, 0, sizeof (freqShiftImagBuf_));
 
 	hilbertPos = 0;
 	{
@@ -465,8 +463,6 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	hilbertWindowCrossfadeRemaining_ = 0;
 	hilbertWindowCrossfadeTotal_ = 0;
 	lastReportedLatency_ = -1;
-	for (auto& state : freqShiftHilbertIir_)
-		state.reset();
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
 	shadowOscPhase = 0.0;
@@ -1303,7 +1299,11 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				refreshRuntimeMidiDerivedState();
 		}
 
+		constexpr float kPhaseParkFreqEpsilon = 0.0001f;
 		smoothedFreq = runtimeFreqCoeff * smoothedFreq + (1.0f - runtimeFreqCoeff) * runtimeTargetFreq;
+		if (std::abs (runtimeTargetFreq) <= kPhaseParkFreqEpsilon
+			&& std::abs (smoothedFreq) <= kPhaseParkFreqEpsilon)
+			smoothedFreq = 0.0f;
 		smoothedPolarity_ = cachedFreqEmaCoeff_ * smoothedPolarity_
 			+ (1.0f - cachedFreqEmaCoeff_) * polarityTarget;
 		smoothedSidechainShadow_ = paramCoeff * smoothedSidechainShadow_
@@ -1588,12 +1588,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// Write into circular Hilbert input buffer
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
 		hilbertBufR[(size_t) hilbertPos] = fbInR;
-		const auto freqShiftIirL = freqShiftHilbertIir_[0].process (fbInL);
-		const auto freqShiftIirR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
-		freqShiftRealBuf_[0][hilbertPos] = freqShiftIirL.first;
-		freqShiftImagBuf_[0][hilbertPos] = freqShiftIirL.second;
-		freqShiftRealBuf_[1][hilbertPos] = freqShiftIirR.first;
-		freqShiftImagBuf_[1][hilbertPos] = freqShiftIirR.second;
 
 		// Harmonic oscillator pairs (fullness/slope profile, RMS-normalized).
 		// AM/RM uses a separately smoothed jitter deviation to avoid audio-rate carrier crackle.
@@ -1616,10 +1610,13 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 		const float amRmWave  = amRmHarmPairL.sine;
 		const float amRmWaveR = amRmHarmPairR.sine;
-		const float fsWave     = fsHarmPairL.sine;
-		const float fsWaveCos  = fsHarmPairL.cosine;
-		const float fsWaveR    = fsHarmPairR.sine;
-		const float fsWaveCosR = fsHarmPairR.cosine;
+		constexpr float kFreqShiftIdentityFadeHz = 0.25f;
+		const float fsIdentityFadeL = smoothStep01 (std::abs (fsRenderFreqL) / kFreqShiftIdentityFadeHz);
+		const float fsIdentityFadeR = smoothStep01 (std::abs (fsRenderFreqR) / kFreqShiftIdentityFadeHz);
+		const float fsWave     = fsHarmPairL.sine * fsIdentityFadeL;
+		const float fsWaveCos  = 1.0f + fsIdentityFadeL * (fsHarmPairL.cosine - 1.0f);
+		const float fsWaveR    = fsHarmPairR.sine * fsIdentityFadeR;
+		const float fsWaveCosR = 1.0f + fsIdentityFadeR * (fsHarmPairR.cosine - 1.0f);
 		const float shadowShiftWave = fastSin ((float) shadowOscPhase);
 		const float shadowShiftWaveCos = fastCos ((float) shadowOscPhase);
 		const float shadowShiftWaveR = fastSin ((float) shadowOscPhaseR);
@@ -1650,6 +1647,20 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 			const float effectRealR = effectInputBufR[(size_t) delayIdx];
 			const float sidechainModL = sidechainModBufL[(size_t) delayIdx] * sidechainPolaritySign;
 			const float sidechainModR = sidechainModBufR[(size_t) delayIdx] * sidechainPolaritySign;
+			const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
+			float freqShiftHilbL = 0.0f;
+			float freqShiftHilbR = 0.0f;
+			const bool needsFreqShiftHilbert = smoothedEngine > 0.5f || engine > 0.5f;
+			if (needsFreqShiftHilbert)
+			{
+				for (const auto& tap : taps)
+				{
+					const int i1 = (hilbertPos - tap.offset + order) & orderMask;
+					const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & orderMask;
+					freqShiftHilbL += tap.coeff * (hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2]);
+					freqShiftHilbR += tap.coeff * (hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2]);
+				}
+			}
 
 			float coreL, coreR;
 			float feedbackCoreL, feedbackCoreR;
@@ -1721,11 +1732,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float internalInputRmL = effectRealL * internalCarrierWaveL;
 				const float internalInputRmR = useStereoInput ? (effectRealR * internalCarrierWaveR) : internalInputRmL;
 
-				const int fsIdx = alignEnabled ? delayIdx : hilbertPos;
-				const float fsRealL = freqShiftRealBuf_[0][fsIdx];
-				const float fsImagL = freqShiftImagBuf_[0][fsIdx];
-				const float fsRealR = freqShiftRealBuf_[1][fsIdx];
-				const float fsImagR = freqShiftImagBuf_[1][fsIdx];
+				const float fsRealL = realL;
+				const float fsImagL = freqShiftHilbL;
+				const float fsRealR = realR;
+				const float fsImagR = freqShiftHilbR;
 				const float fsL = fsRealL * fsCosL - fsImagL * fsSinL;
 				const float fsR = useStereoInput
 					? (style == 2 ? (fsRealR * fsCosR + fsImagR * fsSinR)
@@ -1739,8 +1749,6 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					: 0.0f;
 				if (sidechainShadowMix > 0.0001f)
 				{
-					const auto& taps = hilbertFoldedTapsByWindow_[(size_t) lane];
-					float hilbL = 0.0f, hilbR = 0.0f;
 					float sidechainHilbL = 0.0f, sidechainHilbR = 0.0f;
 					constexpr int kShadowPolarityMaxOffsetSamples = 32;
 					const int shadowPolarityOffset = (int) std::round (
@@ -1748,12 +1756,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					const int sidechainHilbertCentre = (hilbertPos + shadowPolarityOffset + order) & orderMask;
 					for (const auto& tap : taps)
 					{
-						const int i1 = (hilbertPos - tap.offset + order) & orderMask;
-						const int i2 = (hilbertPos - (firLength - 1 - tap.offset) + order) & orderMask;
 						const int sc1 = (sidechainHilbertCentre - tap.offset + order) & orderMask;
 						const int sc2 = (sidechainHilbertCentre - (firLength - 1 - tap.offset) + order) & orderMask;
-						hilbL += tap.coeff * (hilbertBufL[(size_t) i1] - hilbertBufL[(size_t) i2]);
-						hilbR += tap.coeff * (hilbertBufR[(size_t) i1] - hilbertBufR[(size_t) i2]);
 						sidechainHilbL += tap.coeff * (sidechainModBufL[(size_t) sc1] - sidechainModBufL[(size_t) sc2]);
 						sidechainHilbR += tap.coeff * (sidechainModBufR[(size_t) sc1] - sidechainModBufR[(size_t) sc2]);
 					}
@@ -1777,10 +1781,10 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 					const float shadowCosR = shadowBaseCosR * shadowShiftCosR - shadowBaseSinR * shadowShiftSinR;
 					const float shadowSinR = shadowBaseSinR * shadowShiftCosR + shadowBaseCosR * shadowShiftSinR;
 
-					const float shadowRawL = realL * shadowCosL - hilbL * shadowSinL;
+					const float shadowRawL = realL * shadowCosL - freqShiftHilbL * shadowSinL;
 					const float shadowRawR = useStereoInput
-						? (style == 2 ? (realR * shadowCosR + hilbR * shadowSinR)
-						  : (realR * shadowCosR - hilbR * shadowSinR))
+						? (style == 2 ? (realR * shadowCosR + freqShiftHilbR * shadowSinR)
+						  : (realR * shadowCosR - freqShiftHilbR * shadowSinR))
 						: shadowRawL;
 					const float shadowDryR = useStereoInput ? realR : realL;
 					const float shadowDepth = sidechainEffectPresence * sidechainPolarityAbs;
@@ -2208,6 +2212,24 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 			amRmOscPhaseR += (double) amRmFreqR * (double) invSr;
 			amRmOscPhaseR -= std::floor (amRmOscPhaseR);
+		}
+
+		const bool parkFreePhaseAtZero = !syncEnabled
+			&& !runtimeMidiNoteActive
+			&& std::abs (runtimeTargetFreq) <= kPhaseParkFreqEpsilon
+			&& std::abs (smoothedFreq) <= kPhaseParkFreqEpsilon
+			&& std::abs (fsRenderFreqL) <= kPhaseParkFreqEpsilon
+			&& std::abs (fsRenderFreqR) <= kPhaseParkFreqEpsilon
+			&& std::abs (amRmFreqL) <= kPhaseParkFreqEpsilon
+			&& std::abs (amRmFreqR) <= kPhaseParkFreqEpsilon;
+		if (parkFreePhaseAtZero)
+		{
+			oscPhase = 0.0;
+			oscPhaseR = 0.0;
+			shadowOscPhase = 0.0;
+			shadowOscPhaseR = 0.0;
+			amRmOscPhase = 0.0;
+			amRmOscPhaseR = 0.0;
 		}
 
 		hilbertPos = (hilbertPos + 1) & orderMask;

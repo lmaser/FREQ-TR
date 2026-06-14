@@ -914,10 +914,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const bool  pdcEnabled   = loadBoolParamOrDefault (pdcParam, false);
 	const float sidechainSmoothTarget = juce::jlimit (kSidechainSmoothMin, kSidechainSmoothMax,
 		loadAtomicOrDefault (sidechainSmoothParam, kSidechainSmoothDefault));
-	const bool sidechainDirectAtZeroSmooth = sidechainSmoothTarget <= 0.0001f;
-	const float sidechainLegacySmooth = juce::jmin (1.0f, sidechainSmoothTarget * 2.0f);
-	const float sidechainExtendedBlend = juce::jlimit (0.0f, 1.0f, (sidechainSmoothTarget - 0.5f) * 2.0f);
-	const float sidechainGateSmoothShape = (sidechainSmoothTarget <= 0.5f)
+	float sidechainSmoothEffective = sidechainSmoothTarget;
+	if (sidechainSmoothTarget <= 0.25f)
+	{
+		const float t = sidechainSmoothTarget / 0.25f;
+		sidechainSmoothEffective = 0.25f * (2.0f * t * t - t * t * t);
+	}
+	const bool sidechainDirectAtZeroSmooth = sidechainSmoothEffective <= 0.000001f;
+	const float sidechainLegacySmooth = juce::jmin (1.0f, sidechainSmoothEffective * 2.0f);
+	const float sidechainExtendedBlend = juce::jlimit (0.0f, 1.0f, (sidechainSmoothEffective - 0.5f) * 2.0f);
+	const float sidechainGateSmoothShape = (sidechainSmoothEffective <= 0.5f)
 		? sidechainLegacySmooth
 		: (1.0f + 0.5f * sidechainExtendedBlend);
 	const float sidechainToneTarget = juce::jlimit (kSidechainToneMin, kSidechainToneMax,
@@ -928,7 +934,9 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	constexpr float kSidechainMaxGateTau = 0.040f;
 	const float sidechainGateTau = kSidechainMinGateTau
 		+ sidechainGateSmoothShape * sidechainGateSmoothShape * kSidechainMaxGateTau;
-	const float sidechainGateCoeff = std::exp (-1.0f / ((float) currentSampleRate * sidechainGateTau));
+	const float sidechainGateCoeff = sidechainDirectAtZeroSmooth
+		? 0.0f
+		: std::exp (-1.0f / ((float) currentSampleRate * sidechainGateTau));
 	const float sidechainDcCoeff = std::exp (-juce::MathConstants<float>::twoPi * 20.0f / (float) currentSampleRate);
 	const float sidechainToneEndFactor = std::pow (
 		std::pow (10.0f, 18.0f / 10.0f) - 1.0f, 1.0f / 6.0f);
@@ -955,7 +963,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		* sidechainToneBiquadNorm;
 	const float sidechainLegacySmoothSquared = sidechainLegacySmooth * sidechainLegacySmooth;
 	const float sidechainMaxSmoothHz = juce::jmax (20.0f, (float) currentSampleRate * 0.45f);
-	const float sidechainCarrierSmoothMul = (sidechainSmoothTarget <= 0.5f)
+	const float sidechainCarrierSmoothMul = (sidechainSmoothEffective <= 0.5f)
 		? (sidechainMaxSmoothHz / juce::jmax (20.0f, sidechainToneTarget)
 			+ sidechainLegacySmoothSquared * (0.25f - sidechainMaxSmoothHz / juce::jmax (20.0f, sidechainToneTarget)))
 		: juce::jmap (sidechainExtendedBlend, 0.25f, 0.10f);
@@ -964,7 +972,7 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 	const float sidechainCarrierSmoothCoeff = sidechainDirectAtZeroSmooth
 		? 0.0f
 		: std::exp (-juce::MathConstants<float>::twoPi * sidechainCarrierSmoothHz / (float) currentSampleRate);
-	const float sidechainFreqShiftSmoothMultiplier = (sidechainSmoothTarget <= 0.5f)
+	const float sidechainFreqShiftSmoothMultiplier = (sidechainSmoothEffective <= 0.5f)
 		? juce::jmap (sidechainLegacySmooth, 1.0f, 0.25f)
 		: juce::jmap (sidechainExtendedBlend, 0.25f, 0.10f);
 	const float sidechainFreqShiftSmoothHz = juce::jlimit (20.0f, (float) currentSampleRate * 0.45f,
@@ -2383,7 +2391,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FREQTRAudioProcessor::create
 	params.push_back (std::make_unique<juce::AudioParameterBool> (kParamSidechain, "Sidechain", false));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamSidechainSmooth, "Sidechain Smooth",
-		juce::NormalisableRange<float> (kSidechainSmoothMin, kSidechainSmoothMax, 0.01f, 1.0f),
+		juce::NormalisableRange<float> (kSidechainSmoothMin, kSidechainSmoothMax, 0.001f, 1.0f),
 		kSidechainSmoothDefault));
 	params.push_back (std::make_unique<juce::AudioParameterFloat> (
 		kParamSidechainTone, "Sidechain Tone",

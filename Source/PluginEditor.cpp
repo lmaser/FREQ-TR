@@ -122,7 +122,10 @@ static juce::String formatSidechainToneText (float hz)
 
 static juce::String formatSidechainTooltip (float smooth, float tone)
 {
-    return "SMOOTH x" + juce::String (juce::jlimit (0.0f, 1.0f, smooth), 2)
+    return "SMOOTH " + juce::String (juce::roundToInt (
+                juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
+                              FREQTRAudioProcessor::kSidechainSmoothMax,
+                              smooth) * 100.0f)) + "%"
          + " | TONE " + formatSidechainToneText (tone);
 }
 
@@ -3919,7 +3922,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
     auto* aw = new juce::AlertWindow ("", "", juce::AlertWindow::NoIcon);
     aw->setLookAndFeel (&lnf);
-    aw->addTextEditor ("smooth", juce::String (currentSmooth, 2), juce::String());
+    aw->addTextEditor ("smooth", juce::String (juce::roundToInt (currentSmooth * 100.0f)), juce::String());
     aw->addTextEditor ("tone", juce::String (juce::roundToInt (currentTone)), juce::String());
 
     struct PromptBar : public juce::Component
@@ -4035,7 +4038,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
 
     auto* smoothLabel = makeLabel ("sc_smooth_label", "SMOOTH");
     auto* toneLabel = makeLabel ("sc_tone_label", "TONE");
-    auto* smoothUnit = makeLabel ("sc_smooth_unit", "x");
+    auto* smoothUnit = makeLabel ("sc_smooth_unit", "%");
     auto* toneUnit = makeLabel ("sc_tone_unit", "Hz");
 
     auto formatSidechainPromptToneValue = [] (float hz)
@@ -4090,7 +4093,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
     {
         te->setFont (f);
         te->applyFontToAllText (f);
-        te->setInputFilter (new UnitInputFilter (1.0f, 4, true), true);
+        te->setInputFilter (new UnitInputFilter (100.0f, 3, false), true);
     }
     if (auto* te = aw->getTextEditor ("tone"))
     {
@@ -4157,7 +4160,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             const bool isToneRow = te == toneTe;
             const int worstTextW = stringWidth (te->getFont(), isToneRow
                 ? (unit->getText() == "kHz" ? "20.0" : "999")
-                : "1.00");
+                : "100");
             const int labelW = stringWidth (name->getFont(), name->getText()) + 2;
             const int unitTextW = stringWidth (unit->getFont(), unit->getText());
             const int unitW = isToneRow ? (stringWidth (unit->getFont(), "kHz") + 4)
@@ -4252,7 +4255,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
         *syncing = true;
         if (auto* te = aw->getTextEditor ("smooth"))
         {
-            te->setText (juce::String (value01, 2), juce::sendNotification);
+            te->setText (juce::String (juce::roundToInt (value01 * 100.0f)), juce::sendNotification);
             te->selectAll();
         }
         *syncing = false;
@@ -4288,7 +4291,7 @@ void FREQTRAudioProcessorEditor::openSidechainPrompt()
             if (auto* editor = aw->getTextEditor ("smooth"))
                 nextSmooth = juce::jlimit (FREQTRAudioProcessor::kSidechainSmoothMin,
                                          FREQTRAudioProcessor::kSidechainSmoothMax,
-                                         editor->getText().getFloatValue());
+                                         editor->getText().getFloatValue() * 0.01f);
             smoothBar->setValue (nextSmooth);
             *syncing = false;
             pushSidechainValues (nextSmooth, barToTone (toneBar->value01));
@@ -5921,6 +5924,28 @@ void FREQTRAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (getTitleHitArea().contains (pt))
+    {
+        if (e.mods.isPopupMenu())
+        {
+            audioProcessor.toggleFreqShiftHilbertMode();
+            repaint (getTitleHitArea().expanded (4));
+        }
+
+        showFreqShiftHilbertModeTooltip();
+        juce::Timer::callAfterDelay (80,
+            [safeThis = juce::Component::SafePointer<FREQTRAudioProcessorEditor> (this)]()
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                const auto localMouse = safeThis->getLocalPoint (nullptr, juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().toInt());
+                if (safeThis->getTitleHitArea().contains (localMouse))
+                    safeThis->showFreqShiftHilbertModeTooltip();
+            });
+        return;
+    }
+
     // Right-click on value area → numeric entry
     if (e.mods.isPopupMenu())
     {
@@ -6039,6 +6064,41 @@ void FREQTRAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e)
 {
     juce::ignoreUnused (e);
     lastUserInteractionMs.store (juce::Time::getMillisecondCounter(), std::memory_order_relaxed);
+}
+
+void FREQTRAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
+{
+    const auto pt = e.getEventRelativeTo (this).getPosition();
+    if (getTitleHitArea().contains (pt))
+    {
+        setTooltip (getFreqShiftHilbertModeTooltip());
+    }
+    else
+    {
+        setTooltip ({});
+        if (tooltipWindow != nullptr)
+            tooltipWindow->hideTip();
+    }
+}
+
+void FREQTRAudioProcessorEditor::mouseExit (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    setTooltip ({});
+    if (tooltipWindow != nullptr)
+        tooltipWindow->hideTip();
+}
+
+void FREQTRAudioProcessorEditor::showFreqShiftHilbertModeTooltip()
+{
+    const auto tip = getFreqShiftHilbertModeTooltip();
+    setTooltip (tip);
+
+    if (tooltipWindow != nullptr)
+    {
+        const auto screenPos = localPointToGlobal (getTitleHitArea().getTopLeft());
+        tooltipWindow->displayTip (screenPos, tip);
+    }
 }
 
 //========================== Layout builders ==========================
@@ -6412,6 +6472,39 @@ juce::Rectangle<int> FREQTRAudioProcessorEditor::getInfoIconArea() const
     const int x = contentRight - size;
     const int y = titleY + juce::jmax (0, (titleAreaH - size) / 2);
     return { x, y, size, size };
+}
+
+juce::Rectangle<int> FREQTRAudioProcessorEditor::getTitleHitArea() const
+{
+    const int titleH = cachedVLayout_.titleH;
+    const int titleY = cachedVLayout_.titleTopPad;
+    const int titleX = juce::jlimit (0, juce::jmax (0, getWidth() - 1), cachedHLayout_.leftX);
+    const int titleW = juce::jmax (0, juce::jmin (cachedHLayout_.contentW, getWidth() - titleX));
+    if (titleW <= 0 || titleH <= 0)
+        return {};
+
+    const auto infoIconArea = getInfoIconArea();
+    const juce::String titleText ("FREQ-TR");
+    const juce::String versionText = juce::String ("v") + InfoContent::version;
+    auto titleFont = kBoldFont40();
+    titleFont.setHeight ((float) titleH);
+    auto versionFont = juce::Font (juce::FontOptions (juce::jmax (10.0f, (float) titleH * UiMetrics::versionFontRatio)).withStyle ("Bold"));
+    const int versionRight = infoIconArea.getX() - kVersionGapPx;
+    const int measuredVersionW = stringWidth (versionFont, versionText) + 2;
+    const int maxVersionW = juce::jmax (0, versionRight - titleX);
+    const int versionW = juce::jmin (maxVersionW, juce::jmax (28, measuredVersionW));
+    const int versionX = juce::jmax (titleX, versionRight - versionW);
+    const int titleRightLimit = versionX - kTitleRightGapToInfoPx;
+    const int titleMaxW = juce::jmax (0, titleRightLimit - titleX);
+    const int titleTextW = stringWidth (titleFont, titleText);
+    const int hitW = juce::jmin (titleMaxW > 0 ? titleMaxW : titleW, titleTextW + 6);
+    return { titleX, titleY, juce::jmax (0, hitW), titleH + kTitleAreaExtraHeightPx };
+}
+
+juce::String FREQTRAudioProcessorEditor::getFreqShiftHilbertModeTooltip() const
+{
+    return "FREQSHIFT FILTER: "
+         + FREQTRAudioProcessor::getFreqShiftHilbertModeName (audioProcessor.getFreqShiftHilbertMode());
 }
 
 void FREQTRAudioProcessorEditor::updateInfoIconCache()

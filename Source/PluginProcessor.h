@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <atomic>
+#include <utility>
 #include <vector>
 
 class FREQTRAudioProcessor : public juce::AudioProcessor
@@ -122,6 +123,17 @@ public:
 	static constexpr int kHilbertMaxOrder = kHilbertWindowMax;
 	static constexpr int kHilbertMaxFirLength = kHilbertMaxOrder - 1;
 	static constexpr int kHilbertMaxDelay = kHilbertMaxFirLength / 2;
+
+	enum class FreqShiftHilbertMode : int
+	{
+		linear = 0,
+		allpass = 1
+	};
+
+	static juce::String getFreqShiftHilbertModeName (FreqShiftHilbertMode mode)
+	{
+		return mode == FreqShiftHilbertMode::allpass ? "ALLPASS" : "LINEAR";
+	}
 
 	static int getCanonicalHilbertWindow (int windowValue) noexcept
 	{
@@ -296,6 +308,10 @@ public:
 	void setUiCustomPaletteColour (int index, juce::Colour colour);
 	juce::Colour getUiCustomPaletteColour (int index) const noexcept;
 
+	void setFreqShiftHilbertMode (FreqShiftHilbertMode mode);
+	FreqShiftHilbertMode getFreqShiftHilbertMode() const noexcept;
+	void toggleFreqShiftHilbertMode();
+
 	juce::AudioProcessorValueTreeState apvts;
 	static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -316,6 +332,7 @@ private:
 		static constexpr const char* midiPort = "midiPort";
 		static constexpr const char* midiDelayMs = "midiDelayMs";
 		static constexpr const char* ioExpanded = "uiIoExpanded";
+		static constexpr const char* freqShiftHilbertMode = "freqShiftHilbertMode";
 		static constexpr std::array<const char*, 2> customPalette {
 			"uiCustomPalette0", "uiCustomPalette1"
 		};
@@ -345,6 +362,79 @@ private:
 	int hilbertWindowCrossfadeTotal_ = 0;
 	float hilbertWetCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
 	float hilbertFeedbackCompBuf_[kNumHilbertWindows][2][kHilbertMaxOrder] = {};
+	std::atomic<int> freqShiftHilbertMode_ { (int) FreqShiftHilbertMode::linear };
+
+	float freqShiftAllpassRealBuf_[2][kHilbertMaxOrder] = {};
+	float freqShiftAllpassImagBuf_[2][kHilbertMaxOrder] = {};
+
+	struct FreqShiftAllpassSection
+	{
+		float x1 = 0.0f, x2 = 0.0f;
+		float y1 = 0.0f, y2 = 0.0f;
+
+		void reset() noexcept
+		{
+			x1 = x2 = 0.0f;
+			y1 = y2 = 0.0f;
+		}
+
+		float process (float x, float coeff) noexcept
+		{
+			const float y = coeff * (x + y2) - x2;
+			x2 = x1;
+			x1 = x;
+			y2 = y1;
+			y1 = y;
+			return y;
+		}
+	};
+
+	struct FreqShiftAllpassHilbertState
+	{
+		std::array<FreqShiftAllpassSection, 4> h1;
+		std::array<FreqShiftAllpassSection, 4> h2;
+		float h1Delay = 0.0f;
+
+		void reset() noexcept
+		{
+			for (auto& s : h1) s.reset();
+			for (auto& s : h2) s.reset();
+			h1Delay = 0.0f;
+		}
+
+		std::pair<float, float> process (float x) noexcept
+		{
+			static constexpr float c1[4] =
+			{
+				0.6923878f * 0.6923878f,
+				0.9360654322959f * 0.9360654322959f,
+				0.9882295226860f * 0.9882295226860f,
+				0.9987488452737f * 0.9987488452737f
+			};
+			static constexpr float c2[4] =
+			{
+				0.4021921162426f * 0.4021921162426f,
+				0.8561710882420f * 0.8561710882420f,
+				0.9722909545651f * 0.9722909545651f,
+				0.9952884791278f * 0.9952884791278f
+			};
+
+			float imag = x;
+			float real = x;
+			for (int i = 0; i < 4; ++i)
+			{
+				imag = h1[(size_t) i].process (imag, c1[i]);
+				real = h2[(size_t) i].process (real, c2[i]);
+			}
+
+			const float delayedImag = h1Delay;
+			h1Delay = imag;
+			return { real, delayedImag };
+		}
+	};
+
+	FreqShiftAllpassHilbertState freqShiftHilbertIir_[2];
+	float freqShiftHilbertModeSmoothed_ = 0.0f;
 
 	// ── Harmonics normalization / weighting ──
 	static constexpr int kMaxHarmonics = 16;

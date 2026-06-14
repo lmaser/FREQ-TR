@@ -464,6 +464,8 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	sidechainModBufR.assign ((size_t) kHilbertMaxOrder, 0.0f);
 	std::memset (hilbertWetCompBuf_, 0, sizeof (hilbertWetCompBuf_));
 	std::memset (hilbertFeedbackCompBuf_, 0, sizeof (hilbertFeedbackCompBuf_));
+	std::memset (freqShiftAllpassRealBuf_, 0, sizeof (freqShiftAllpassRealBuf_));
+	std::memset (freqShiftAllpassImagBuf_, 0, sizeof (freqShiftAllpassImagBuf_));
 
 	hilbertPos = 0;
 	{
@@ -480,6 +482,9 @@ void FREQTRAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 	hilbertWindowCrossfadeRemaining_ = 0;
 	hilbertWindowCrossfadeTotal_ = 0;
 	lastReportedLatency_ = -1;
+	for (auto& state : freqShiftHilbertIir_)
+		state.reset();
+	freqShiftHilbertModeSmoothed_ = (float) freqShiftHilbertMode_.load (std::memory_order_relaxed);
 	oscPhase = 0.0;
 	oscPhaseR = 0.0;
 	shadowOscPhase = 0.0;
@@ -1291,6 +1296,8 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		return y;
 	};
 
+	const float freqShiftModeCoeff = std::exp (-1.0f / ((float) currentSampleRate * 0.010f));
+
 	for (int n = 0; n < numSamples; ++n)
 	{
 		if (pendingMidiEventCount_ > 0)
@@ -1605,6 +1612,17 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 		// Write into circular Hilbert input buffer
 		hilbertBufL[(size_t) hilbertPos] = fbInL;
 		hilbertBufR[(size_t) hilbertPos] = fbInR;
+		const auto freqShiftAllpassL = freqShiftHilbertIir_[0].process (fbInL);
+		const auto freqShiftAllpassR = freqShiftHilbertIir_[1].process (style >= 1 ? fbInR : fbInL);
+		freqShiftAllpassRealBuf_[0][hilbertPos] = freqShiftAllpassL.first;
+		freqShiftAllpassImagBuf_[0][hilbertPos] = freqShiftAllpassL.second;
+		freqShiftAllpassRealBuf_[1][hilbertPos] = freqShiftAllpassR.first;
+		freqShiftAllpassImagBuf_[1][hilbertPos] = freqShiftAllpassR.second;
+
+		const float freqShiftModeTarget = (float) juce::jlimit (0, 1,
+			freqShiftHilbertMode_.load (std::memory_order_relaxed));
+		freqShiftHilbertModeSmoothed_ = freqShiftHilbertModeSmoothed_ * freqShiftModeCoeff
+			+ freqShiftModeTarget * (1.0f - freqShiftModeCoeff);
 
 		// Harmonic oscillator pairs (fullness/slope profile, RMS-normalized).
 		// AM/RM uses a separately smoothed jitter deviation to avoid audio-rate carrier crackle.
@@ -1749,10 +1767,16 @@ void FREQTRAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 				const float internalInputRmL = effectRealL * internalCarrierWaveL;
 				const float internalInputRmR = useStereoInput ? (effectRealR * internalCarrierWaveR) : internalInputRmL;
 
-				const float fsRealL = realL;
-				const float fsImagL = freqShiftHilbL;
-				const float fsRealR = realR;
-				const float fsImagR = freqShiftHilbR;
+				const int fsAllpassIdx = alignEnabled ? delayIdx : hilbertPos;
+				const float allpassRealL = freqShiftAllpassRealBuf_[0][fsAllpassIdx];
+				const float allpassImagL = freqShiftAllpassImagBuf_[0][fsAllpassIdx];
+				const float allpassRealR = freqShiftAllpassRealBuf_[1][fsAllpassIdx];
+				const float allpassImagR = freqShiftAllpassImagBuf_[1][fsAllpassIdx];
+				const float hilbertModeMix = juce::jlimit (0.0f, 1.0f, freqShiftHilbertModeSmoothed_);
+				const float fsRealL = realL + hilbertModeMix * (allpassRealL - realL);
+				const float fsImagL = freqShiftHilbL + hilbertModeMix * (allpassImagL - freqShiftHilbL);
+				const float fsRealR = realR + hilbertModeMix * (allpassRealR - realR);
+				const float fsImagR = freqShiftHilbR + hilbertModeMix * (allpassImagR - freqShiftHilbR);
 				const float fsL = fsRealL * fsCosL - fsImagL * fsSinL;
 				const float fsR = useStereoInput
 					? (style == 2 ? (fsRealR * fsCosR + fsImagR * fsSinR)
@@ -2316,6 +2340,10 @@ void FREQTRAudioProcessor::setStateInformation (const void* data, int sizeInByte
 			if (! restoredDelay.isVoid())
 				midiDelayMs.store (juce::jlimit (0, 100, (int) restoredDelay), std::memory_order_relaxed);
 
+			const auto restoredFreqShiftMode = apvts.state.getProperty (UiStateKeys::freqShiftHilbertMode);
+			if (! restoredFreqShiftMode.isVoid())
+				freqShiftHilbertMode_.store (juce::jlimit (0, 1, (int) restoredFreqShiftMode), std::memory_order_relaxed);
+
 			clearPendingMidiEvents();
 			clearMidiTrackingState();
 
@@ -2610,6 +2638,27 @@ bool FREQTRAudioProcessor::getUiIoExpanded() const noexcept
 	const auto fromState = apvts.state.getProperty (UiStateKeys::ioExpanded);
 	if (! fromState.isVoid()) return (bool) fromState;
 	return false;
+}
+
+void FREQTRAudioProcessor::setFreqShiftHilbertMode (FreqShiftHilbertMode mode)
+{
+	const int value = juce::jlimit (0, 1, (int) mode);
+	freqShiftHilbertMode_.store (value, std::memory_order_relaxed);
+	apvts.state.setProperty (UiStateKeys::freqShiftHilbertMode, value, nullptr);
+}
+
+FREQTRAudioProcessor::FreqShiftHilbertMode FREQTRAudioProcessor::getFreqShiftHilbertMode() const noexcept
+{
+	return freqShiftHilbertMode_.load (std::memory_order_relaxed) == (int) FreqShiftHilbertMode::allpass
+		? FreqShiftHilbertMode::allpass
+		: FreqShiftHilbertMode::linear;
+}
+
+void FREQTRAudioProcessor::toggleFreqShiftHilbertMode()
+{
+	setFreqShiftHilbertMode (getFreqShiftHilbertMode() == FreqShiftHilbertMode::linear
+		? FreqShiftHilbertMode::allpass
+		: FreqShiftHilbertMode::linear);
 }
 
 void FREQTRAudioProcessor::setMidiChannel (int channel)

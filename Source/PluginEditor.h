@@ -8,6 +8,7 @@
 #include "TRSharedUI.h"
 
 class FREQTRAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                    public juce::SettableTooltipClient,
                                     private juce::Slider::Listener,
                                     private juce::AudioProcessorValueTreeState::Listener,
                                     private juce::Timer
@@ -26,6 +27,8 @@ private:
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
 
     void openNumericEntryPopupForSlider (juce::Slider& s);
     void openMidiChannelPrompt();
@@ -530,6 +533,7 @@ private:
     int getCurrentMaxHilbertWindow() const;
     void syncWindowToMax (bool notifyHost);
     void updatePdcTooltip();
+    void showFreqShiftHilbertModeTooltip();
     void updateSidechainDependentControls();
 
     juce::String getEngineText() const;
@@ -586,6 +590,8 @@ private:
     juce::Rectangle<int> getChaosFilterLabelArea() const;
     juce::Rectangle<int> getChaosDelayLabelArea() const;
     juce::Rectangle<int> getInfoIconArea() const;
+    juce::Rectangle<int> getTitleHitArea() const;
+    juce::String getFreqShiftHilbertModeTooltip() const;
     void updateInfoIconCache();
     bool refreshLegendTextCache();
     juce::Rectangle<int> getRowRepaintBounds (const juce::Slider& s) const;

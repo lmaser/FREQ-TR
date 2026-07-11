@@ -166,7 +166,7 @@ If the sidechain bus is not connected or contains no incoming audio, the sidecha
 `FREQ`, `MOD`, `SYNC`, and `MIDI` remain active in `SIDECHAIN` mode. They set the internal/base frequency used by the fallback path and by the frequency-shift interaction while the sidechain detector controls the external modulation depth.
 
 Right-click `SIDECHAIN` to open its modulation prompt:
-- `SMOOTH` ranges from `x0.00` to `x1.00`; default is `x0.25`. `x0.00..x0.50` reproduces the original sidechain timing range exactly, while `x0.50..x1.00` extends to slower detector/input smoothing and inertia before AM/RM/frequency-shift processing.
+- `SMOOTH` ranges from `0%` to `100%`; default is `25%`. `0%` is direct, low values keep extra resolution for fast sidechain tracking, `0%..50%` covers the original sidechain timing range, and `50%..100%` extends to slower detector/input smoothing and inertia before AM/RM/frequency-shift processing.
 - `TONE` ranges from `250 Hz` to `20 kHz`; default is `5 kHz`. It sets the useful upper sidechain tone limit before AM/RM/frequency-shift processing; the internal third-order Butterworth conditioning is already significantly attenuated at the displayed value.
 
 The sidechain path includes DC blocking, Butterworth tone conditioning, SMOOTH-dependent detector/input inertia, and Hilbert quadrature conversion where `SHADOW` is used. In AM mode, sidechain level drives the modulation envelope rather than simply reducing the wet output level. In FREQ SHIFT mode, both direct sidechain shift depth and `SHADOW` blend follow the smoothed detector depth so tiny input transitions do not hard-switch the sidechain texture.
@@ -328,7 +328,7 @@ Independent post-processing inversion controls for polarity and stereo swap, wit
 - Added selectable `WIN` control for frequency-shift Hilbert window length
 - Added `MAX WIN` cap from the `PDC` prompt for lower optional Hilbert latency
 - Added optional `SIDECHAIN` modulation mode with smooth/tone prompt
-- Extended `SIDECHAIN` SMOOTH/TONE range and made sidechain frequency-shift direction follow `POLARITY`
+- Extended `SIDECHAIN` SMOOTH/TONE range, changed `SMOOTH` display to the shared percentage convention, and made sidechain frequency-shift direction follow `POLARITY`
 - Added `SHADOW` blend for FREQ SHIFT sidechain texture
 - Refined FREQ SHIFT sidechain entry so direct sidechain shift and `SHADOW` follow detector depth instead of opening abruptly at the detection threshold
 - Added limiter with `WET` / `GLOBAL` modes

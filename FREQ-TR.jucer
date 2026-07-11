@@ -14,7 +14,6 @@
       <FILE id="Fpx3Dw" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
       <FILE id="FprtFx" name="CrtEffect.h" compile="0" resource="0" file="Source/CrtEffect.h"/>
       <FILE id="FpnfCn" name="InfoContent.h" compile="0" resource="0" file="Source/InfoContent.h"/>
-      <FILE id="FpShUI" name="TRSharedUI.h" compile="0" resource="0" file="Source/TRSharedUI.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>

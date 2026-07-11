@@ -16,10 +16,13 @@ public:
 	static constexpr const char* kParamFreq      = "freq";
 	static constexpr const char* kParamFreqSync   = "freq_sync";
 	static constexpr const char* kParamMod       = "mod";
+	static constexpr const char* kParamModHarm    = "mod_harm";
 	static constexpr const char* kParamFeedback  = "feedback";
 	static constexpr const char* kParamJitter    = "jitter";
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
+	static constexpr const char* kParamEngineBias = "engine_bias";
+	static constexpr const char* kParamEngineFocus = "engine_focus";
 	static constexpr const char* kParamWindow    = "window";
 	static constexpr const char* kParamMaxWindow = "max_window";
 	static constexpr const char* kParamStyle     = "style";
@@ -34,8 +37,14 @@ public:
 	static constexpr const char* kParamAlign     = "align";
 	static constexpr const char* kParamPdc       = "pdc";
 	static constexpr const char* kParamSidechain = "sidechain";
+	static constexpr const char* kParamSidechainGain   = "sidechain_gain";
 	static constexpr const char* kParamSidechainSmooth = "sidechain_smooth";
-	static constexpr const char* kParamSidechainTone = "sidechain_tone";
+	static constexpr const char* kParamSidechainHp     = "sidechain_hp";
+	static constexpr const char* kParamSidechainLp     = "sidechain_lp";
+	static constexpr const char* kParamSidechainHpOn   = "sidechain_hp_on";
+	static constexpr const char* kParamSidechainLpOn   = "sidechain_lp_on";
+	static constexpr const char* kParamSidechainHpSlope = "sidechain_hp_slope";
+	static constexpr const char* kParamSidechainLpSlope = "sidechain_lp_slope";
 	static constexpr const char* kParamSidechainShadow = "sidechain_shadow";
 
 	static constexpr const char* kParamFilterHpFreq  = "filter_hp_freq";
@@ -83,8 +92,11 @@ public:
 	static constexpr const char* kParamUiHeight  = "ui_height";
 	static constexpr const char* kParamUiPalette = "ui_palette";
 	static constexpr const char* kParamUiCrt     = "ui_fx_tail";
+	static constexpr const char* kParamUiIoFx    = "ui_io_fx";
 	static constexpr const char* kParamUiColor0  = "ui_color0";
 	static constexpr const char* kParamUiColor1  = "ui_color1";
+	static constexpr const char* kParamUiColor2  = "ui_color2";
+	static constexpr const char* kParamUiColor3  = "ui_color3";
 
 	// Parameter ranges and defaults
 	static constexpr float kFreqMin     =  0.0f;
@@ -162,6 +174,12 @@ public:
 	static constexpr float kEngineMin     = 0.0f;
 	static constexpr float kEngineMax     = 1.0f;
 	static constexpr float kEngineDefault = 0.0f;   // 0 = AM, 0.5 = Ring Mod, 1 = Freq Shift
+	static constexpr float kEngineBiasMin     = -100.0f;
+	static constexpr float kEngineBiasMax     =  100.0f;
+	static constexpr float kEngineBiasDefault =    0.0f;
+	static constexpr float kEngineFocusMin     =    0.0f;
+	static constexpr float kEngineFocusMax     =  100.0f;
+	static constexpr float kEngineFocusDefault =    0.0f;
 
 	static constexpr int kStyleMin     = 0;
 	static constexpr int kStyleMax     = 3;         // 0 = MONO, 1 = STEREO, 2 = WIDE, 3 = DUAL
@@ -178,9 +196,17 @@ public:
 	static constexpr float kSidechainSmoothMin     = 0.0f;
 	static constexpr float kSidechainSmoothMax     = 1.0f;
 	static constexpr float kSidechainSmoothDefault = 0.25f;
-	static constexpr float kSidechainToneMin     = 250.0f;
-	static constexpr float kSidechainToneMax     = 20000.0f;
-	static constexpr float kSidechainToneDefault = 5000.0f;
+	static constexpr float kSidechainGainMin       = -144.0f;
+	static constexpr float kSidechainGainMax       =   24.0f;
+	static constexpr float kSidechainGainDefault   =    0.0f;
+	static constexpr float kSidechainFilterFreqMin =   20.0f;
+	static constexpr float kSidechainFilterFreqMax = 20000.0f;
+	static constexpr float kSidechainHpDefault     =   20.0f;
+	static constexpr float kSidechainLpDefault     = 20000.0f;
+	static constexpr bool  kSidechainHpOnDefault   = true;
+	static constexpr bool  kSidechainLpOnDefault   = true;
+	static constexpr int   kSidechainHpSlopeDefault = 1;
+	static constexpr int   kSidechainLpSlopeDefault = 1;
 	static constexpr float kSidechainShadowMin     = 0.0f;
 	static constexpr float kSidechainShadowMax     = 1.0f;
 	static constexpr float kSidechainShadowDefault = 1.0f;
@@ -229,7 +255,7 @@ public:
 	static constexpr float kChaosSpdDefault = 5.0f;
 
 	// Mode In / Mode Out / Sum Bus defaults
-	static constexpr int   kModeInOutDefault = 0;
+	static constexpr int   kModeInOutDefault = 0;   // 0=L+R, 1=M/S, 2=MID, 3=SIDE
 	static constexpr int   kSumBusDefault    = 0;
 	static constexpr float kSqrt2Over2       = 0.707106781f;
 
@@ -296,6 +322,10 @@ public:
 
 	void setUiCrtEnabled (bool enabled);
 	bool getUiCrtEnabled() const noexcept;
+	void setUiIoFxEnabled (bool enabled);
+	bool getUiIoFxEnabled() const noexcept;
+	float getInputMeterPeak() const noexcept { return inputMeterPeak_.load (std::memory_order_relaxed); }
+	float getOutputMeterPeak() const noexcept { return outputMeterPeak_.load (std::memory_order_relaxed); }
 
 	void setMidiChannel (int channel);
 	int getMidiChannel() const noexcept;
@@ -329,12 +359,13 @@ private:
 		static constexpr const char* editorHeight = "uiEditorHeight";
 		static constexpr const char* useCustomPalette = "uiUseCustomPalette";
 		static constexpr const char* crtEnabled = "uiFxTailEnabled";
+		static constexpr const char* ioFxEnabled = "uiIoFxEnabled";
 		static constexpr const char* midiPort = "midiPort";
 		static constexpr const char* midiDelayMs = "midiDelayMs";
 		static constexpr const char* ioExpanded = "uiIoExpanded";
 		static constexpr const char* freqShiftHilbertMode = "freqShiftHilbertMode";
-		static constexpr std::array<const char*, 2> customPalette {
-			"uiCustomPalette0", "uiCustomPalette1"
+		static constexpr std::array<const char*, 4> customPalette {
+			"uiCustomPalette0", "uiCustomPalette1", "uiCustomPalette2", "uiCustomPalette3"
 		};
 	};
 
@@ -484,6 +515,8 @@ private:
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM->RM->FreqShift blend
+	float smoothedEngineBias_ = kEngineBiasDefault;
+	float smoothedEngineFocus_ = kEngineFocusDefault;
 	float smoothedHarm = 0.0f;     // EMA-smoothed harmonic density
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 	float smoothedDryLevel = kDryLevelDefault;
@@ -500,24 +533,10 @@ private:
 	float sidechainDcPrevInR_ = 0.0f;
 	float sidechainDcPrevOutL_ = 0.0f;
 	float sidechainDcPrevOutR_ = 0.0f;
-	struct SidechainToneFilterState
-	{
-		float oneX1 = 0.0f;
-		float oneY1 = 0.0f;
-		float biquadX1 = 0.0f;
-		float biquadX2 = 0.0f;
-		float biquadY1 = 0.0f;
-		float biquadY2 = 0.0f;
-
-		void reset() noexcept
-		{
-			oneX1 = oneY1 = 0.0f;
-			biquadX1 = biquadX2 = 0.0f;
-			biquadY1 = biquadY2 = 0.0f;
-		}
-	};
-	SidechainToneFilterState sidechainToneFilterL_;
-	SidechainToneFilterState sidechainToneFilterR_;
+	WetFilterBiquadState sidechainHpFilterL_[2];
+	WetFilterBiquadState sidechainHpFilterR_[2];
+	WetFilterBiquadState sidechainLpFilterL_[2];
+	WetFilterBiquadState sidechainLpFilterR_[2];
 	float sidechainCarrierSmoothL_ = 0.0f;
 	float sidechainCarrierSmoothR_ = 0.0f;
 	float sidechainFreqShiftSmoothL_ = 0.0f;
@@ -612,10 +631,13 @@ private:
 	// ── Cached parameter pointers ──
 	std::atomic<float>* freqParam    = nullptr;
 	std::atomic<float>* modParam     = nullptr;
+	std::atomic<float>* modHarmParam = nullptr;
 	std::atomic<float>* feedbackParam = nullptr;
 	std::atomic<float>* jitterParam   = nullptr;
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
+	std::atomic<float>* engineBiasParam = nullptr;
+	std::atomic<float>* engineFocusParam = nullptr;
 	std::atomic<float>* windowParam  = nullptr;
 	std::atomic<float>* maxWindowParam = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
@@ -625,6 +647,7 @@ private:
 	std::atomic<float>* inputParam   = nullptr;
 	std::atomic<float>* outputParam  = nullptr;
 	std::atomic<float>* syncParam    = nullptr;
+	std::atomic<float>* freqSyncParam = nullptr;
 	std::atomic<float>* retrigParam  = nullptr;
 	std::atomic<float>* midiParam    = nullptr;
 	std::atomic<float>* alignParam   = nullptr;
@@ -640,8 +663,14 @@ private:
 		}
 	}
 	std::atomic<float>* sidechainParam = nullptr;
+	std::atomic<float>* sidechainGainParam = nullptr;
 	std::atomic<float>* sidechainSmoothParam = nullptr;
-	std::atomic<float>* sidechainToneParam = nullptr;
+	std::atomic<float>* sidechainHpParam = nullptr;
+	std::atomic<float>* sidechainLpParam = nullptr;
+	std::atomic<float>* sidechainHpOnParam = nullptr;
+	std::atomic<float>* sidechainLpOnParam = nullptr;
+	std::atomic<float>* sidechainHpSlopeParam = nullptr;
+	std::atomic<float>* sidechainLpSlopeParam = nullptr;
 	std::atomic<float>* sidechainShadowParam = nullptr;
 	std::atomic<float>* filterHpFreqParam  = nullptr;
 	std::atomic<float>* filterLpFreqParam  = nullptr;
@@ -674,16 +703,21 @@ private:
 	std::atomic<float>* uiHeightParam  = nullptr;
 	std::atomic<float>* uiPaletteParam = nullptr;
 	std::atomic<float>* uiCrtParam     = nullptr;
-	std::array<std::atomic<float>*, 2> uiColorParams { nullptr, nullptr };
+	std::array<std::atomic<float>*, 4> uiColorParams { nullptr, nullptr, nullptr, nullptr };
+	std::atomic<float>* uiIoFxParam = nullptr;
+	std::atomic<float> inputMeterPeak_ { 0.0f };
+	std::atomic<float> outputMeterPeak_ { 0.0f };
 
 	// UI state atomics
 	std::atomic<int> uiEditorWidth { 360 };
 	std::atomic<int> uiEditorHeight { 752 };
 	std::atomic<int> uiUseCustomPalette { 0 };
 	std::atomic<int> uiCrtEnabled { 0 };
-	std::array<std::atomic<juce::uint32>, 2> uiCustomPalette {
-		std::atomic<juce::uint32> { juce::Colours::white.getARGB() },
-		std::atomic<juce::uint32> { juce::Colours::black.getARGB() }
+	std::array<std::atomic<juce::uint32>, 4> uiCustomPalette {
+		std::atomic<juce::uint32> { juce::Colour (0xff00ff00).getARGB() },
+		std::atomic<juce::uint32> { juce::Colours::black.getARGB() },
+		std::atomic<juce::uint32> { juce::Colours::blue.getARGB() },
+		std::atomic<juce::uint32> { juce::Colours::red.getARGB() }
 	};
 
 	// ── Tilt EQ state (1st-order shelving, 1 kHz pivot) ──

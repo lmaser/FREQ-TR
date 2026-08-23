@@ -1,19 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="FQ1TRg" name="FREQ-TR" projectType="audioplug" useAppConfig="0"
+              version="1.4.0" companyName="NMSTR" companyWebsite="https://github.com/lmaser/FREQ-TR"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
-              pluginWantsMidiInput="1">
+              pluginWantsMidiInput="1" pluginCharacteristicsValue="pluginWantsMidiIn">
   <MAINGROUP id="fqRIdB" name="FREQ-TR">
     <GROUP id="{A103E3A1-F3E4-B394-BDC1-B15CCC3926B8}" name="Source">
       <FILE id="Fp1dp6" name="PluginProcessor.cpp" compile="1" resource="0"
             file="Source/PluginProcessor.cpp"/>
       <FILE id="FpWyjQ" name="PluginProcessor.h" compile="0" resource="0"
             file="Source/PluginProcessor.h"/>
-      <FILE id="FpYiez" name="PluginEditor.cpp" compile="1" resource="0"
-            file="Source/PluginEditor.cpp"/>
-      <FILE id="Fpx3Dw" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
-      <FILE id="FprtFx" name="CrtEffect.h" compile="0" resource="0" file="Source/CrtEffect.h"/>
-      <FILE id="FpnfCn" name="InfoContent.h" compile="0" resource="0" file="Source/InfoContent.h"/>
+      <GROUP id="freqModulation" name="Modulation">
+        <FILE id="freqModCfgC" name="FreqModulationConfig.cpp" compile="1" resource="0" file="Source/Modulation/FreqModulationConfig.cpp"/>
+        <FILE id="freqModCfgH" name="FreqModulationConfig.h" compile="0" resource="0" file="Source/Modulation/FreqModulationConfig.h"/>
+      </GROUP>
+      <GROUP id="freqUiV2" name="UIV2">
+        <FILE id="freqUiD1" name="FreqUiDefinition.cpp" compile="1" resource="0"
+              file="Source/UIV2/FreqUiDefinition.cpp"/>
+        <FILE id="freqUiD2" name="FreqUiDefinition.h" compile="0" resource="0"
+              file="Source/UIV2/FreqUiDefinition.h"/>
+        <FILE id="freqUiB1" name="FreqBackendBindings.cpp" compile="1" resource="0"
+              file="Source/UIV2/FreqBackendBindings.cpp"/>
+        <FILE id="freqUiB2" name="FreqBackendBindings.h" compile="0" resource="0"
+              file="Source/UIV2/FreqBackendBindings.h"/>
+        <FILE id="freqUiF1" name="FreqV2EditorFactory.cpp" compile="1" resource="0"
+              file="Source/UIV2/FreqV2EditorFactory.cpp"/>
+        <FILE id="freqUiF2" name="FreqV2EditorFactory.h" compile="0" resource="0"
+              file="Source/UIV2/FreqV2EditorFactory.h"/>
+      </GROUP>
+    </GROUP>
+    <GROUP id="sharedUiV2" name="TR-Shared UI V2">
+      <FILE id="sharedV2C" name="TRSimpleUIV2.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/TRSimpleUIV2.cpp"/>
+      <FILE id="sharedV2H" name="TRSimpleUIV2.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/TRSimpleUIV2.h"/>
+      <FILE id="sharedV2E" name="SimpleEditorHost.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Runtime/SimpleEditorHost.cpp"/>
+      <FILE id="sharedV2EH" name="SimpleEditorHost.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Runtime/SimpleEditorHost.h"/>
+      <FILE id="sharedV2B" name="SimpleJuceBackend.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Runtime/SimpleJuceBackend.h"/>
+      <FILE id="sharedV2GS1" name="SimpleGlobalSettings.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Runtime/SimpleGlobalSettings.cpp"/>
+      <FILE id="sharedV2GS2" name="SimpleGlobalSettings.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Runtime/SimpleGlobalSettings.h"/>
+      <FILE id="sharedV2PM1" name="TRPresetManager.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Preset/TRPresetManager.cpp"/>
+      <FILE id="sharedV2PM2" name="TRPresetManager.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Preset/TRPresetManager.h"/>
+      <FILE id="sharedV2LF1" name="SimpleV2LookAndFeel.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Style/SimpleV2LookAndFeel.cpp"/>
+      <FILE id="sharedV2LF2" name="SimpleV2LookAndFeel.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Style/SimpleV2LookAndFeel.h"/>
+      <FILE id="sharedV2DC1" name="SimpleDescriptorControl.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleDescriptorControl.cpp"/>
+      <FILE id="sharedV2DC2" name="SimpleDescriptorControl.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleDescriptorControl.h"/>
+      <FILE id="sharedV2DP1" name="SimpleDetailPanel.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleDetailPanel.cpp"/>
+      <FILE id="sharedV2DP2" name="SimpleDetailPanel.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleDetailPanel.h"/>
+      <FILE id="sharedV2PB1" name="SimplePresetBrowser.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimplePresetBrowser.cpp"/>
+      <FILE id="sharedV2PB2" name="SimplePresetBrowser.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimplePresetBrowser.h"/>
+      <FILE id="sharedV2SP1" name="SimpleSettingsPanel.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleSettingsPanel.cpp"/>
+      <FILE id="sharedV2SP2" name="SimpleSettingsPanel.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleSettingsPanel.h"/>
+      <FILE id="sharedV2VS1" name="SimpleVisualSignature.cpp" compile="1" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleVisualSignature.cpp"/>
+      <FILE id="sharedV2VS2" name="SimpleVisualSignature.h" compile="0" resource="0" file="../TR-Shared/SimpleUIV2/Components/SimpleVisualSignature.h"/>
+    </GROUP>
+    <GROUP id="sharedModulation" name="TR-Shared Modulation">
+      <FILE id="sharedModStateC" name="TRModulationState.cpp" compile="1" resource="0" file="../TR-Shared/Modulation/State/TRModulationState.cpp"/>
+      <FILE id="sharedModStateH" name="TRModulationState.h" compile="0" resource="0" file="../TR-Shared/Modulation/State/TRModulationState.h"/>
+      <FILE id="sharedModRuntimeC" name="TRModulationRuntime.cpp" compile="1" resource="0" file="../TR-Shared/Modulation/Runtime/TRModulationRuntime.cpp"/>
+      <FILE id="sharedModRuntimeH" name="TRModulationRuntime.h" compile="0" resource="0" file="../TR-Shared/Modulation/Runtime/TRModulationRuntime.h"/>
+      <FILE id="sharedModBridgeC" name="TRParameterModulationBridge.cpp" compile="1" resource="0" file="../TR-Shared/Modulation/Integration/TRParameterModulationBridge.cpp"/>
+      <FILE id="sharedModBridgeH" name="TRParameterModulationBridge.h" compile="0" resource="0" file="../TR-Shared/Modulation/Integration/TRParameterModulationBridge.h"/>
+      <FILE id="sharedModUiC" name="TRModulationWorkspace.cpp" compile="1" resource="0" file="../TR-Shared/Modulation/UI/TRModulationWorkspace.cpp"/>
+      <FILE id="sharedModUiH" name="TRModulationWorkspace.h" compile="0" resource="0" file="../TR-Shared/Modulation/UI/TRModulationWorkspace.h"/>
+      <FILE id="sharedSimpleModC" name="TRSimpleModulationWorkspace.cpp" compile="1" resource="0" file="../TR-Shared/Modulation/UI/TRSimpleModulationWorkspace.cpp"/>
+      <FILE id="sharedSimpleModH" name="TRSimpleModulationWorkspace.h" compile="0" resource="0" file="../TR-Shared/Modulation/UI/TRSimpleModulationWorkspace.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>

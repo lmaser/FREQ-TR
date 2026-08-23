@@ -5,7 +5,13 @@
 #include <atomic>
 #include <utility>
 #include <vector>
-#include "../../TR-Shared/SimpleUI/SimpleUIStateKeys.h"
+#include "Modulation/FreqModulationConfig.h"
+#include "../../TR-Shared/SimpleDSP/TRLimiterBank.h"
+#include "../../TR-Shared/SimpleDSP/TRPhaseQuadrature.h"
+#include "../../TR-Shared/SimpleDSP/TRStateCanonicalization.h"
+#include "../../TR-Shared/SimpleDSP/TRTemporalDSP.h"
+#include "../../TR-Shared/AudioAnalysis/SignatureWetTelemetry.h"
+#include "../../TR-Shared/Modulation/Runtime/TRAdaptiveJitterKernel.h"
 
 class FREQTRAudioProcessor : public juce::AudioProcessor
 {
@@ -23,9 +29,13 @@ public:
 	static constexpr const char* kParamComb      = "comb";
 	static constexpr const char* kParamEngine    = "engine";
 	static constexpr const char* kParamEngineBias = "engine_bias";
-	static constexpr const char* kParamEngineFocus = "engine_focus";
+	// The stable ID is retained so pre-release states created with FOCUS still load.
+	static constexpr const char* kParamEngineRectify = "engine_focus";
+	static constexpr const char* kParamRmSpread = "rm_spread";
+	static constexpr const char* kParamRmModulator = "rm_modulator";
 	static constexpr const char* kParamWindow    = "window";
 	static constexpr const char* kParamMaxWindow = "max_window";
+	static constexpr const char* kParamHilbertMode = "hilbert_mode";
 	static constexpr const char* kParamStyle     = "style";
 	static constexpr const char* kParamHarm      = "harm";
 	static constexpr const char* kParamPolarity  = "polarity";
@@ -69,6 +79,7 @@ public:
 	// Limiter
 	static constexpr const char* kParamLimThreshold  = "lim_threshold";
 	static constexpr const char* kParamLimMode       = "lim_mode";
+	static constexpr const char* kParamLimQuality    = "lim_quality";
 
 	// Invert Polarity / Invert Stereo
 	static constexpr const char* kParamInvPol        = "inv_pol";
@@ -89,15 +100,6 @@ public:
 	static constexpr const char* kParamChaosSpdFilter = "chaos_spd_filter";
 
 	// UI state parameters (hidden from DAW automation)
-	static constexpr const char* kParamUiWidth   = "ui_width";
-	static constexpr const char* kParamUiHeight  = "ui_height";
-	static constexpr const char* kParamUiPalette = "ui_palette";
-	static constexpr const char* kParamUiCrt     = "ui_fx_tail";
-	static constexpr const char* kParamUiIoFx    = "ui_io_fx";
-	static constexpr const char* kParamUiColor0  = "ui_color0";
-	static constexpr const char* kParamUiColor1  = "ui_color1";
-	static constexpr const char* kParamUiColor2  = "ui_color2";
-	static constexpr const char* kParamUiColor3  = "ui_color3";
 
 	// Parameter ranges and defaults
 	static constexpr float kFreqMin     =  0.0f;
@@ -178,9 +180,14 @@ public:
 	static constexpr float kEngineBiasMin     = -100.0f;
 	static constexpr float kEngineBiasMax     =  100.0f;
 	static constexpr float kEngineBiasDefault =    0.0f;
-	static constexpr float kEngineFocusMin     =    0.0f;
-	static constexpr float kEngineFocusMax     =  100.0f;
-	static constexpr float kEngineFocusDefault =    0.0f;
+	static constexpr float kEngineRectifyMin     = -100.0f;
+	static constexpr float kEngineRectifyMax     =  100.0f;
+	static constexpr float kEngineRectifyDefault =    0.0f;
+	static constexpr float kRmSpreadMin     =   0.0f;
+	static constexpr float kRmSpreadMax     = 100.0f;
+	static constexpr float kRmSpreadDefault =   0.0f;
+	static constexpr int kRmModulatorTone  = 0;
+	static constexpr int kRmModulatorNoise = 1;
 
 	static constexpr int kStyleMin     = 0;
 	static constexpr int kStyleMax     = 3;         // 0 = MONO, 1 = STEREO, 2 = WIDE, 3 = DUAL
@@ -265,6 +272,7 @@ public:
 	static constexpr float kLimThresholdMax  =   0.0f;
 	static constexpr float kLimThresholdDefault = 0.0f;
 	static constexpr int   kLimModeDefault   = 0;
+	static constexpr int   kLimQualityDefault = 0;
 
 	// Invert Polarity / Invert Stereo defaults
 	static constexpr int   kInvPolDefault    = 0;   // 0=NONE  1=WET  2=GLOBAL
@@ -313,31 +321,33 @@ public:
 	void getCurrentProgramStateInformation (juce::MemoryBlock& destData) override;
 	void setCurrentProgramStateInformation (const void* data, int sizeInBytes) override;
 
-	// UI state management
-	void setUiEditorSize (int width, int height);
-	int getUiEditorWidth() const noexcept;
-	int getUiEditorHeight() const noexcept;
-
-	void setUiUseCustomPalette (bool shouldUseCustomPalette);
-	bool getUiUseCustomPalette() const noexcept;
-
-	void setUiCrtEnabled (bool enabled);
-	bool getUiCrtEnabled() const noexcept;
-	void setUiIoFxEnabled (bool enabled);
-	bool getUiIoFxEnabled() const noexcept;
 	float getInputMeterPeak() const noexcept { return inputMeterPeak_.load (std::memory_order_relaxed); }
 	float getOutputMeterPeak() const noexcept { return outputMeterPeak_.load (std::memory_order_relaxed); }
+	using WetTelemetrySnapshot = TR::AudioAnalysis::SignatureWetTelemetry::Snapshot;
+	void beginWetTelemetryCapture() noexcept { wetTelemetry_.beginCapture(); }
+	void endWetTelemetryCapture() noexcept { wetTelemetry_.endCapture(); }
+	WetTelemetrySnapshot getWetTelemetrySnapshot() const noexcept { return wetTelemetry_.readLatest(); }
+
+	struct CarrierTopologyTelemetry
+	{
+		float carrierFrequency = 0.5f;
+		float enginePosition = 0.0f;
+		float harmonicAmount = 0.0f;
+		float harmonicCapacity = 1.0f;
+		float feedbackMagnitude = 0.0f;
+		float feedbackPolarity = 1.0f;
+		float feedbackSpacing = 0.0f;
+		float engineBias = 0.5f;
+		float engineRectify = 0.5f;
+		float stereoTopology = 1.0f / 3.0f;
+	};
+
+	CarrierTopologyTelemetry getCarrierTopologyTelemetry() const noexcept;
 
 	void setMidiChannel (int channel);
 	int getMidiChannel() const noexcept;
 	void setMidiDelayMs (int delayMsValue);
 	int getMidiDelayMs() const noexcept;
-
-	void setUiIoExpanded (bool expanded);
-	bool getUiIoExpanded() const noexcept;
-
-	void setUiCustomPaletteColour (int index, juce::Colour colour);
-	juce::Colour getUiCustomPaletteColour (int index) const noexcept;
 
 	void setFreqShiftHilbertMode (FreqShiftHilbertMode mode);
 	FreqShiftHilbertMode getFreqShiftHilbertMode() const noexcept;
@@ -345,6 +355,19 @@ public:
 
 	juce::AudioProcessorValueTreeState apvts;
 	static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+	TR::Modulation::State modulationState() const;
+	bool setModulationState(const TR::Modulation::State&);
+	std::uint64_t modulationStateGeneration() const noexcept;
+	std::array<float, TR::Modulation::macroCount> modulationMacroValues() const noexcept;
+	void setModulationMacroValue(int macro, float value);
+	TR::Modulation::Runtime::TelemetrySnapshot modulationTelemetry() const noexcept;
+	bool modulationDestinationValues(juce::StringRef id, float& base,
+	                                 float& effective) const noexcept;
+	bool routedCarrierConfigured() const noexcept
+	{
+		return modulation.destinationHasActiveRoutes (TR::FreqModulation::carrier);
+	}
+	friend struct FreqNativeSidechainTestAccess;
 
 	struct BiquadState  { float s1 = 0.0f, s2 = 0.0f; };
 	struct BiquadCoeffs { float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f; };
@@ -354,21 +377,34 @@ public:
 	struct WetFilterBiquadState  { float z1 = 0.0f, z2 = 0.0f; };
 
 private:
+	TR::Modulation::Integration::ParameterModulationBridge modulation;
+	TR::Modulation::Runtime::MidiEventBuffer modulationMidiEvents;
+
 	struct UiStateKeys
 	{
-		static constexpr const char* editorWidth = TR::SimpleUiStateKeys::editorWidth;
-		static constexpr const char* editorHeight = TR::SimpleUiStateKeys::editorHeight;
-		static constexpr const char* useCustomPalette = TR::SimpleUiStateKeys::useCustomPalette;
-		static constexpr const char* crtEnabled = TR::SimpleUiStateKeys::crtEnabled;
-		static constexpr const char* ioFxEnabled = TR::SimpleUiStateKeys::ioFxEnabled;
 		static constexpr const char* midiPort = "midiPort";
 		static constexpr const char* midiDelayMs = "midiDelayMs";
-		static constexpr const char* ioExpanded = "uiIoExpanded";
 		static constexpr const char* freqShiftHilbertMode = "freqShiftHilbertMode";
-		static constexpr auto customPalette = TR::SimpleUiStateKeys::customPalette;
 	};
 
-	double currentSampleRate = 44100.0;
+	void resetCarrierTopologyTelemetry() noexcept;
+	void publishCarrierTopologyTelemetry (float effectiveFrequencyHz, float enginePosition,
+	                                      float harmonicShape, float feedbackMagnitude,
+	                                      float combHz, float effectiveBias, float engineRectify,
+	                                      int stereoTopology, float activity) noexcept;
+
+	std::atomic<float> telemetryCarrierFrequency_ { 0.5f };
+	std::atomic<float> telemetryEnginePosition_ { 0.0f };
+	std::atomic<float> telemetryHarmonicAmount_ { 0.0f };
+	std::atomic<float> telemetryHarmonicCapacity_ { 1.0f };
+	std::atomic<float> telemetryFeedbackMagnitude_ { 0.0f };
+	std::atomic<float> telemetryFeedbackPolarity_ { 1.0f };
+	std::atomic<float> telemetryFeedbackSpacing_ { 0.0f };
+	std::atomic<float> telemetryEngineBias_ { 0.5f };
+	std::atomic<float> telemetryEngineRectify_ { 0.5f };
+	std::atomic<float> telemetryStereoTopology_ { 1.0f / 3.0f };
+
+	double currentSampleRate = 0.0;
 
 	// ── Hilbert transform (FIR, linear phase) ──
 	// 90° FIR + matched delay for real (0°) path.
@@ -380,7 +416,7 @@ private:
 	int hilbertPos = 0;                                // write position in circular buffers
 
 	// Folded Hilbert taps: exploit antisymmetry + zero-skip.
-	struct HilbertTap { int offset; float coeff; };
+	using HilbertTap = TR::DSP::HilbertFoldedTap;
 	std::array<std::vector<HilbertTap>, kNumHilbertWindows> hilbertFoldedTapsByWindow_;
 	int activeHilbertWindow_ = kHilbertWindowDefault;
 	int targetHilbertWindow_ = kHilbertWindowDefault;
@@ -397,73 +433,7 @@ private:
 	float freqShiftAllpassRealBuf_[2][kHilbertMaxOrder] = {};
 	float freqShiftAllpassImagBuf_[2][kHilbertMaxOrder] = {};
 
-	struct FreqShiftAllpassSection
-	{
-		float x1 = 0.0f, x2 = 0.0f;
-		float y1 = 0.0f, y2 = 0.0f;
-
-		void reset() noexcept
-		{
-			x1 = x2 = 0.0f;
-			y1 = y2 = 0.0f;
-		}
-
-		float process (float x, float coeff) noexcept
-		{
-			const float y = coeff * (x + y2) - x2;
-			x2 = x1;
-			x1 = x;
-			y2 = y1;
-			y1 = y;
-			return y;
-		}
-	};
-
-	struct FreqShiftAllpassHilbertState
-	{
-		std::array<FreqShiftAllpassSection, 4> h1;
-		std::array<FreqShiftAllpassSection, 4> h2;
-		float h1Delay = 0.0f;
-
-		void reset() noexcept
-		{
-			for (auto& s : h1) s.reset();
-			for (auto& s : h2) s.reset();
-			h1Delay = 0.0f;
-		}
-
-		std::pair<float, float> process (float x) noexcept
-		{
-			static constexpr float c1[4] =
-			{
-				0.6923878f * 0.6923878f,
-				0.9360654322959f * 0.9360654322959f,
-				0.9882295226860f * 0.9882295226860f,
-				0.9987488452737f * 0.9987488452737f
-			};
-			static constexpr float c2[4] =
-			{
-				0.4021921162426f * 0.4021921162426f,
-				0.8561710882420f * 0.8561710882420f,
-				0.9722909545651f * 0.9722909545651f,
-				0.9952884791278f * 0.9952884791278f
-			};
-
-			float imag = x;
-			float real = x;
-			for (int i = 0; i < 4; ++i)
-			{
-				imag = h1[(size_t) i].process (imag, c1[i]);
-				real = h2[(size_t) i].process (real, c2[i]);
-			}
-
-			const float delayedImag = h1Delay;
-			h1Delay = imag;
-			return { real, delayedImag };
-		}
-	};
-
-	FreqShiftAllpassHilbertState freqShiftHilbertIir_[2];
+	TR::DSP::AllPassQuadrature8 freqShiftHilbertIir_[2];
 	float freqShiftHilbertModeSmoothed_ = 0.0f;
 
 	// ── Harmonics normalization / weighting ──
@@ -513,9 +483,15 @@ private:
 	HarmonicOscPair fastHarmonicOscPair (float phase, float harmNorm, float fundamentalHz) const noexcept;
 
 	float smoothedFreq = 0.0f;     // EMA-smoothed frequency target
+	juce::AudioBuffer<float> jitterMotionReferencePeriods_;
 	float smoothedEngine = 0.0f;   // EMA-smoothed AM->RM->FreqShift blend
 	float smoothedEngineBias_ = kEngineBiasDefault;
-	float smoothedEngineFocus_ = kEngineFocusDefault;
+	float smoothedEngineRectify_ = kEngineRectifyDefault;
+	float smoothedRmSpread_ = kRmSpreadDefault;
+	float smoothedRmNoiseMix_ = 0.0f;
+	std::array<juce::uint32, 2> rmNoiseState_ { 0x6d2b79f5u, 0x1b56c4e9u };
+	std::array<float, 2> rmNoiseLowpass_ {};
+	float nextRmNoiseSample (int channel, float cutoffHz) noexcept;
 	float smoothedHarm = 0.0f;     // EMA-smoothed harmonic density
 	float smoothedMix = 1.0f;      // EMA-smoothed dry/wet
 	float smoothedDryLevel = kDryLevelDefault;
@@ -544,6 +520,15 @@ private:
 	float sidechainGateSmoothed_ = 0.0f;
 	float sidechainDepthSmoothed_ = 0.0f;
 	float smoothedSidechainShadow_ = kSidechainShadowDefault;
+	TR::Modulation::Runtime::ControlSignalView sharedSidechainControl_ {};
+	TR::Modulation::Runtime::ControlSignalView sharedSidechainActivity_ {};
+	TR::Modulation::Runtime::ConditionedAudioView sharedConditionedSidechain_ {};
+	float sharedSidechainRouteAmount_ = 1.0f;
+	bool useNativeSidechainForTests_ = false;
+	float* jitterEvidenceNativeLForTests_ = nullptr;
+	float* jitterEvidenceNativeRForTests_ = nullptr;
+	int jitterEvidenceCapacityForTests_ = 0;
+	int jitterEvidenceIndexForTests_ = 0;
 
 	// ── Feedback state ──
 	juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> feedbackSmoothed;
@@ -636,9 +621,12 @@ private:
 	std::atomic<float>* combParam     = nullptr;
 	std::atomic<float>* engineParam  = nullptr;
 	std::atomic<float>* engineBiasParam = nullptr;
-	std::atomic<float>* engineFocusParam = nullptr;
+	std::atomic<float>* engineRectifyParam = nullptr;
+	std::atomic<float>* rmSpreadParam = nullptr;
+	std::atomic<float>* rmModulatorParam = nullptr;
 	std::atomic<float>* windowParam  = nullptr;
 	std::atomic<float>* maxWindowParam = nullptr;
+	std::atomic<float>* hilbertModeParam = nullptr;
 	std::atomic<float>* styleParam   = nullptr;
 	std::atomic<float>* harmParam    = nullptr;
 	std::atomic<float>* polarityParam = nullptr;
@@ -655,10 +643,11 @@ private:
 
 	void updateReportedLatency (int newLatencySamples)
 	{
-		if (newLatencySamples != lastReportedLatency_)
+		const int totalLatencySamples = newLatencySamples + limiterBank_.getAdditionalLatencySamples();
+		if (totalLatencySamples != lastReportedLatency_)
 		{
-			setLatencySamples (newLatencySamples);
-			lastReportedLatency_ = newLatencySamples;
+			setLatencySamples (totalLatencySamples);
+			lastReportedLatency_ = totalLatencySamples;
 		}
 	}
 	std::atomic<float>* sidechainParam = nullptr;
@@ -692,32 +681,16 @@ private:
 	std::atomic<float>* sumBusParam    = nullptr;
 	std::atomic<float>* limThresholdParam = nullptr;
 	std::atomic<float>* limModeParam     = nullptr;
+	std::atomic<float>* limQualityParam  = nullptr;
 	std::atomic<float>* invPolParam      = nullptr;
 	std::atomic<float>* invStrParam      = nullptr;
 	std::atomic<float>* mixModeParam     = nullptr;
 	std::atomic<float>* dryLevelParam    = nullptr;
 	std::atomic<float>* wetLevelParam    = nullptr;
 	std::atomic<float>* filterPosParam   = nullptr;
-	std::atomic<float>* uiWidthParam   = nullptr;
-	std::atomic<float>* uiHeightParam  = nullptr;
-	std::atomic<float>* uiPaletteParam = nullptr;
-	std::atomic<float>* uiCrtParam     = nullptr;
-	std::array<std::atomic<float>*, 4> uiColorParams { nullptr, nullptr, nullptr, nullptr };
-	std::atomic<float>* uiIoFxParam = nullptr;
 	std::atomic<float> inputMeterPeak_ { 0.0f };
 	std::atomic<float> outputMeterPeak_ { 0.0f };
-
-	// UI state atomics
-	std::atomic<int> uiEditorWidth { 360 };
-	std::atomic<int> uiEditorHeight { 752 };
-	std::atomic<int> uiUseCustomPalette { 0 };
-	std::atomic<int> uiCrtEnabled { 0 };
-	std::array<std::atomic<juce::uint32>, 4> uiCustomPalette {
-		std::atomic<juce::uint32> { juce::Colour (0xff00ff00).getARGB() },
-		std::atomic<juce::uint32> { juce::Colours::black.getARGB() },
-		std::atomic<juce::uint32> { juce::Colours::blue.getARGB() },
-		std::atomic<juce::uint32> { juce::Colours::red.getARGB() }
-	};
+	TR::AudioAnalysis::SignatureWetTelemetry wetTelemetry_;
 
 	// ── Tilt EQ state (1st-order shelving, 1 kHz pivot) ──
 	float tiltDb_ = 0.0f;
@@ -762,8 +735,8 @@ private:
 	// CHS D parameters
 	float chaosAmtD_                    = 0.0f;
 	float chaosAmtNormD_                = 0.0f;   // cached amtD * 0.01
-	float chaosShPeriodD_               = 8820.0f;
-	float smoothedChaosShPeriodD_       = 8820.0f;
+	float chaosShPeriodD_               = 0.0f;
+	float smoothedChaosShPeriodD_       = 0.0f;
 	float chaosDelayMaxSamples_         = 0.0f;
 	float smoothedChaosDelayMaxSamples_ = 0.0f;
 	float chaosGainMaxDb_               = 0.0f;
@@ -796,8 +769,8 @@ private:
 
 	// CHS F parameters
 	float chaosAmtF_                  = 0.0f;
-	float chaosShPeriodF_             = 8820.0f;
-	float smoothedChaosShPeriodF_     = 8820.0f;
+	float chaosShPeriodF_             = 0.0f;
+	float smoothedChaosShPeriodF_     = 0.0f;
 	float chaosFilterMaxOct_          = 0.0f;
 	float smoothedChaosFilterMaxOct_  = 0.0f;
 	float chaosFilterAmtSmoothed_     = 0.0f;
@@ -978,29 +951,9 @@ private:
 		float& driftPhase, float& driftFreqHz, float& output,
 		juce::Random& rng, float period, float amtNorm, float sr) noexcept
 	{
-		const float safePeriod = juce::jmax (1.0f, period);
-		phase += 1.0f / safePeriod;
-		if (phase >= 1.0f)
-		{
-			phase -= std::floor (phase);
-			prev = curr;
-			curr = next;
-			next = rng.nextFloat() * 2.0f - 1.0f;
-			const float driftBase = sr / safePeriod * 0.37f;
-			driftFreqHz = driftBase * (0.88f + rng.nextFloat() * 0.24f);
-		}
-		const float t = juce::jlimit (0.0f, 1.0f, phase);
-		const float t2 = t * t;
-		const float t3 = t2 * t;
-		const float u = t3 * (t * (t * 6.0f - 15.0f) + 10.0f);
-		const float shValue = curr + (next - curr) * u;
-
-		driftPhase += driftFreqHz / sr;
-		if (driftPhase > 1e6f) driftPhase -= 1e6f;
-		const float driftValue = std::sin (driftPhase * kTwoPi) * kChaosDriftAmp;
-
-		const float shWeight = juce::jlimit (0.0f, 1.0f, amtNorm * 1.5f - 0.15f);
-		output = driftValue + shValue * shWeight;
+		TR::Modulation::AdaptiveJitter::advanceChaosEngine (
+			prev, curr, next, phase, driftPhase, driftFreqHz, output, rng,
+			period, amtNorm, sr, kChaosDriftAmp, kTwoPi);
 	}
 
 	static float smoothStep01 (float x) noexcept
@@ -1009,33 +962,7 @@ private:
 		return t * t * (3.0f - 2.0f * t);
 	}
 
-	static float jitterShortness (float delayMs) noexcept
-	{
-		return juce::jlimit (0.0f, 1.0f,
-			std::log2 (kJitterMidRefMs / delayMs) / std::log2 (kJitterMidRefMs / kJitterShortRefMs));
-	}
-
-	static float jitterLongness (float delayMs) noexcept
-	{
-		return juce::jlimit (0.0f, 1.0f,
-			std::log2 (delayMs / kJitterLongnessRefMs) / std::log2 (kJitterLongRefMs / kJitterLongnessRefMs));
-	}
-
-	struct JitterMetrics
-	{
-		float amountMapped = 0.0f;
-		float delayMs = 1.0f;
-		float shortness = 0.0f;
-		float longness = 0.0f;
-		float driftRateHz = 0.1f;
-		float flutterRateHz = 4.0f;
-		float toneRateHz = 0.0f;
-		float driftWeight = 0.4f;
-		float flutterWeight = 0.5f;
-		float toneWeight = 0.0f;
-		float delayDepthOct = 0.0f;
-		float feedbackDepth = 0.0f;
-	};
+	using JitterMetrics = TR::Modulation::AdaptiveJitter::Response;
 
 	static float compressJitterFrequencyRateDelayMs (float rawDelayMs) noexcept
 	{
@@ -1048,60 +975,17 @@ private:
 	inline JitterMetrics makeJitterMetrics (float rateDelaySamples, float depthDelaySamples,
 	                                        float amount, float sr, int laneIndex) const noexcept
 	{
-		JitterMetrics m;
-		m.amountMapped = juce::jlimit (0.0f, 1.0f, amount);
-
 		const float safeSr = juce::jmax (1.0f, sr);
-		m.delayMs = juce::jmax (kJitterMinDelayMs,
+		const float rateDelayMs = juce::jmax (kJitterMinDelayMs,
 			juce::jmax (kJitterMinDelaySamples, rateDelaySamples) * 1000.0f / safeSr);
-		const float rateDelaySeconds = m.delayMs * 0.001f;
 		const float depthDelayMs = juce::jmax (kJitterMinDelayMs,
 			juce::jmax (kJitterMinDelaySamples, depthDelaySamples) * 1000.0f / safeSr);
 		const float depthDelaySeconds = depthDelayMs * 0.001f;
-		const float delayHz = 1.0f / rateDelaySeconds;
-
-		m.shortness = jitterShortness (m.delayMs);
-		m.longness = jitterLongness (m.delayMs);
-
-		const float high = smoothStep01 ((m.amountMapped - kJitterHighStart) / kJitterHighRange);
-		const float extreme = smoothStep01 ((m.amountMapped - kJitterExtremeStart) / kJitterExtremeRange);
-
-		m.driftRateHz = (kJitterDriftRateBaseHz + (kJitterDriftRateTopHz - kJitterDriftRateBaseHz) * m.amountMapped)
-		              * (1.0f - kJitterDriftLongnessDamping * m.longness)
-		              * (1.0f + kJitterDriftShortnessBoost * m.shortness);
-		m.driftRateHz = juce::jlimit (kJitterDriftRateMinHz, kJitterDriftRateMaxHz, m.driftRateHz);
-
-		m.flutterRateHz = (kJitterFlutterRateBaseHz + (kJitterFlutterRateTopHz - kJitterFlutterRateBaseHz) * m.amountMapped)
-		                * std::pow (kJitterFlutterRefMs / m.delayMs, kJitterFlutterDelayPower);
-		m.flutterRateHz = juce::jlimit (kJitterFlutterRateMinHz, kJitterFlutterRateMaxHz, m.flutterRateHz);
-
-		const float toneAmount = smoothStep01 ((m.amountMapped - kJitterToneStart) / kJitterToneRange);
-		const float toneLift = kJitterToneLiftBase + kJitterToneLiftAmount * m.amountMapped
-		                      + high * kJitterToneLiftHigh + extreme * kJitterToneLiftExtreme;
-		const float toneShort = std::pow (m.shortness, kJitterToneShortnessPower);
-		const float harmonic = (laneIndex & 1) == 0 ? 1.0f : kJitterToneRightHarmonic;
-		const float toneCeilHz = juce::jmin (kJitterToneCeilHz, safeSr * kJitterToneCeilSampleRateRatio);
-		m.toneRateHz = juce::jlimit (0.0f, toneCeilHz, delayHz * toneLift * toneShort * harmonic);
-
-		m.driftWeight = juce::jlimit (kJitterDriftWeightMin, kJitterDriftWeightMax,
-			kJitterDriftWeightBase + kJitterDriftWeightLongness * m.longness
-			- kJitterDriftWeightShortness * m.shortness);
-		m.flutterWeight = juce::jlimit (kJitterFlutterWeightMin, kJitterFlutterWeightMax,
-			kJitterFlutterWeightBase + kJitterFlutterWeightShortness * m.shortness
-			+ kJitterFlutterWeightHigh * high);
-		m.toneWeight = toneAmount * std::pow (m.shortness, kJitterToneWeightShortnessPower)
-		             * (kJitterToneWeightBase + kJitterToneWeightAmount * m.amountMapped);
-		m.toneWeight = juce::jlimit (0.0f, kJitterToneWeightMax, m.toneWeight);
-
-		const float targetDepthRatio = kJitterDepthRatio * std::pow (m.amountMapped, kJitterDepthPower);
-		const float maxDepthSeconds = depthDelaySeconds * kJitterMaxDepthRatio;
-		const float depthSeconds = juce::jlimit (kJitterMinDepthSeconds, maxDepthSeconds,
-			depthDelaySeconds * targetDepthRatio);
-		m.delayDepthOct = std::log2 ((depthDelaySeconds + depthSeconds) / depthDelaySeconds);
-
-		m.feedbackDepth = (kJitterFeedbackDepthBase + kJitterFeedbackDepthRange * m.amountMapped) * m.amountMapped
-		                * (1.0f + kJitterFeedbackShortBoost * m.shortness);
-		return m;
+		TR::Modulation::AdaptiveJitter::ResponseConfig config;
+		config.toneCeilSampleRateRatio = kJitterToneCeilSampleRateRatio;
+		config.toneWeightMaximum = kJitterToneWeightMax;
+		return TR::Modulation::AdaptiveJitter::evaluateResponse (
+			rateDelayMs, depthDelaySeconds, amount, safeSr, laneIndex, config);
 	}
 
 	inline JitterMetrics makeJitterMetrics (float baseDelaySamples, float amount, float sr, int laneIndex) const noexcept
@@ -1244,6 +1128,16 @@ private:
 		const JitterMetrics combMetrics = makeJitterMetrics (safeCombDelay, amt, sr, 3);
 		jitterCombOut_ = advanceJitterModulator (jitterCombMod_, combMetrics, sr, 3);
 		jitterCombDepthOct_ = combMetrics.delayDepthOct;
+		if (jitterEvidenceIndexForTests_ < jitterEvidenceCapacityForTests_)
+		{
+			if (jitterEvidenceNativeLForTests_ != nullptr)
+				jitterEvidenceNativeLForTests_[jitterEvidenceIndexForTests_]
+					= jitterFreqOut_[0] * jitterFreqDepthOct_[0];
+			if (jitterEvidenceNativeRForTests_ != nullptr)
+				jitterEvidenceNativeRForTests_[jitterEvidenceIndexForTests_]
+					= jitterFreqOut_[1] * jitterFreqDepthOct_[1];
+			++jitterEvidenceIndexForTests_;
+		}
 	}
 
 	inline float getJitteredFrequencyHz (float baseFreq, int channel) const noexcept
@@ -1467,48 +1361,11 @@ private:
 	}
 
 	// ── Dual-stage transparent peak limiter ──
-	static constexpr float kLimFloor = 1.0e-12f;
-	float limEnv1_[2] = { kLimFloor, kLimFloor };
-	float limEnv2_[2] = { kLimFloor, kLimFloor };
-	float limAtt1_  = 0.0f;
-	float limRel1_  = 0.0f;
-	float limRel2_  = 0.0f;
+	TR::DSP::LimiterBank limiterBank_;
 
 	inline void applyLimiterSample (float& sampleL, float& sampleR, float thresholdGain) noexcept
 	{
-		const float peakL = std::abs (sampleL);
-		const float peakR = std::abs (sampleR);
-
-		for (int ch = 0; ch < 2; ++ch)
-		{
-			const float p = (ch == 0) ? peakL : peakR;
-			if (p > limEnv1_[ch])
-				limEnv1_[ch] = limAtt1_ * limEnv1_[ch] + (1.0f - limAtt1_) * p;
-			else
-				limEnv1_[ch] = limRel1_ * limEnv1_[ch] + (1.0f - limRel1_) * p;
-			if (limEnv1_[ch] < kLimFloor) limEnv1_[ch] = kLimFloor;
-		}
-
-		for (int ch = 0; ch < 2; ++ch)
-		{
-			const float p = (ch == 0) ? peakL : peakR;
-			if (p > limEnv2_[ch])
-				limEnv2_[ch] = p;
-			else
-				limEnv2_[ch] = limRel2_ * limEnv2_[ch] + (1.0f - limRel2_) * p;
-			if (limEnv2_[ch] < kLimFloor) limEnv2_[ch] = kLimFloor;
-		}
-
-		float gr = 1.0f;
-		const float maxEnv1 = juce::jmax (limEnv1_[0], limEnv1_[1]);
-		const float maxEnv2 = juce::jmax (limEnv2_[0], limEnv2_[1]);
-		if (maxEnv1 > thresholdGain)
-			gr = juce::jmin (gr, thresholdGain / maxEnv1);
-		if (maxEnv2 > thresholdGain)
-			gr = juce::jmin (gr, thresholdGain / maxEnv2);
-
-		sampleL *= gr;
-		sampleR *= gr;
+		limiterBank_.fastProcessor().processStereo (sampleL, sampleR, thresholdGain);
 	}
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FREQTRAudioProcessor)
